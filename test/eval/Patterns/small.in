@@ -1,0 +1,24 @@
+let foo x =
+  match x with
+    1 -> "one"
+  | 2 -> "two"
+  | _ when x > 100 -> "big"
+  | _ -> "other"
+
+let bar x =
+  match x with
+    1 -> "bar one"
+  | 2 -> "bar two"
+  | _ when x > 100 -> "bar big"
+  | _ -> "bar other"
+
+
+let _ =
+  print_endline (foo 1);
+  print_endline (bar 1);
+  print_endline (foo 2);
+  print_endline (bar 2);
+  print_endline (foo 901);
+  print_endline (bar 1989);
+  print_endline (foo 0);
+  print_endline (bar (-1));

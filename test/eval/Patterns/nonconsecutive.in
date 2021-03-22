@@ -1,0 +1,18 @@
+let foo x =
+  match x with
+    1 -> "1"
+  | 2 -> "2"
+  | 3 -> "3"
+  | 10 -> "10"
+  | 100 -> "100"
+  | _ -> "Something else"
+
+let _ =
+  foo 1 |> print_endline;
+  foo 2 |> print_endline;
+  foo 3 |> print_endline;
+  foo 4 |> print_endline;
+  foo 10 |> print_endline;
+  foo 100 |> print_endline;
+  foo (-13) |> print_endline;
+  foo 42 |> print_endline;
