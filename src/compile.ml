@@ -20,6 +20,8 @@ let enable_debug_typed = ref false
 
 let enable_debug_lambda = ref false
 
+let enable_compile_mcore = ref false
+
 let output_file = ref "stdout"
 
 (* Default file info names *)
@@ -699,6 +701,21 @@ let to_output str =
     let oc = open_out outfile in
     fprintf oc "%s\n" str ; close_out oc
 
+let mcore_compile str =
+  if !enable_compile_mcore then
+    match Sys.getenv_opt "MCORE_STDLIB" with
+    | Some mcore_stdlib ->
+        (* Write output to temporary file *)
+        let oc = open_out "temp.mc" in
+        fprintf oc "%s\n" str ;
+        close_out oc ;
+        Sys.command
+          ("mi " ^ mcore_stdlib ^ "/../src/main/mi.mc -- compile temp.mc")
+        |> ignore
+    | None ->
+        failwith "Source-to-source compilation requires MCORE_STDLIB to be set"
+  else ()
+
 let ocaml2mcore filename =
   Compmisc.init_path () ;
   let mcore_prog =
@@ -706,4 +723,7 @@ let ocaml2mcore filename =
     |> pprint_mcore
   in
   let includes = String.concat "\n" (SS.elements !includes_ref) in
-  to_output (String.concat "\n" [includes; prelude (); "mexpr"; mcore_prog])
+  let full_prog =
+    String.concat "\n" [includes; prelude (); "mexpr"; mcore_prog]
+  in
+  to_output full_prog ; mcore_compile full_prog

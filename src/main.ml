@@ -1,7 +1,5 @@
 open Compile
 
-(* Add support for source-to-source compilation *)
-
 (* Main menu *)
 let usage_msg = "Usage: ocaml2mcore <filename>\n\nOptions:"
 
@@ -24,7 +22,10 @@ let main =
     ; ( "-o"
       , Arg.Set_string output_file
       , " Write MCore output to this file (defaults to stdout if not given)."
-      ) ]
+      )
+    ; ( "--to-ocaml"
+      , Arg.Set enable_compile_mcore
+      , " Compile the produced MCore code back into OCaml." ) ]
   in
   (* Align the command line description list *)
   let speclist = Arg.align speclist in
