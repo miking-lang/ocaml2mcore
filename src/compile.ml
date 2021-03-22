@@ -706,7 +706,7 @@ let mcore_compile str =
     match Sys.getenv_opt "MCORE_STDLIB" with
     | Some mcore_stdlib ->
         (* Write output to temporary file *)
-        let oc = open_out "temp.mc" in
+        let oc = open_out "prog.mc" in
         fprintf oc "%s\n" str ;
         close_out oc ;
         Sys.command
