@@ -312,6 +312,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
         add_include "char.mc" ;
         Boot.Parserutils.parse_mexpr_string
           (from_utf8 "lam c. escapeChar (int2char c)")
+    | "Stdlib.read_line" ->
+        mk_var "" "readLine"
     | _ when module_is_defined (get_module s) ->
         mk_var "" s
     | _ ->
@@ -710,7 +712,7 @@ let mcore_compile str =
         fprintf oc "%s\n" str ;
         close_out oc ;
         Sys.command
-          ("mi " ^ mcore_stdlib ^ "/../src/main/mi.mc -- compile temp.mc")
+          ("mi " ^ mcore_stdlib ^ "/../src/main/mi.mc -- compile prog.mc")
         |> ignore
     | None ->
         failwith "Source-to-source compilation requires MCORE_STDLIB to be set"
