@@ -1,0 +1,4 @@
+mexpr
+if leqf 0.000000 3.000000 then
+  3.000000
+else negf 3.000000

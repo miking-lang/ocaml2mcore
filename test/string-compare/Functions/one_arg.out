@@ -1,0 +1,2 @@
+mexpr
+let foo = lam x. x in foo

@@ -1,0 +1,15 @@
+let rec fibonacci n =
+  if n < 3 then
+    1
+  else
+    fibonacci (n-1) + fibonacci (n-2)
+
+let _ =
+  print_endline (string_of_int (fibonacci 1));
+  print_endline (string_of_int (fibonacci 2));
+  print_endline (string_of_int (fibonacci 3));
+  print_endline (string_of_int (fibonacci 4));
+  print_endline (string_of_int (fibonacci 5));
+  print_endline (string_of_int (fibonacci 6));
+  print_endline (string_of_int (fibonacci 7));
+  print_endline (string_of_int (fibonacci 20))

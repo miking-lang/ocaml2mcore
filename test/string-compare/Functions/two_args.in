@@ -1,0 +1,2 @@
+let foo x y = x + y in
+42

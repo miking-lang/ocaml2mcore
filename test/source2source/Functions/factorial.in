@@ -1,0 +1,5 @@
+let rec factorial x =
+  if x <= 1 then 1 else x * (factorial (x - 1))
+
+let _ =
+  print_endline (string_of_int (factorial 4))

@@ -1,0 +1,21 @@
+module Foo = struct
+  let foo x y = x + y
+
+  let v = 42
+
+  module Bar = struct
+    let bar x y = x * y
+  end
+end
+
+let v1 = Foo.foo 1 2
+let v2 = Foo.Bar.bar 3 2
+
+let _ =
+  print_endline (string_of_int v1)
+
+let _ =
+  print_endline (string_of_int v2)
+
+let _ =
+  print_endline (string_of_int Foo.v)

@@ -1,0 +1,3 @@
+mexpr
+lam x. lam y. lam z.
+  addi (addi x y) z

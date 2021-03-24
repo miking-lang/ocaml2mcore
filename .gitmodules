@@ -1,0 +1,3 @@
+[submodule "ocaml-multicore"]
+	path = ocaml-multicore
+	url = git@github.com:miking-lang/ocaml-multicore

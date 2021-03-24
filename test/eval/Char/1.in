@@ -1,0 +1,10 @@
+let printChar c =
+  print_endline ("\'" ^ (Char.escaped c) ^ "\'")
+
+let _ =
+  printChar 'a';
+  printChar '\n';
+  printChar '\t';
+  printChar '\\';
+  printChar '\'';
+  printChar '\"'

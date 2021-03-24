@@ -1,0 +1,7 @@
+type rec_type = {foo : int -> int; bar : int}
+
+let _ =
+  let r = {foo = (fun x -> x + 1); bar = 3} in
+  print_endline (string_of_int (r.foo 41));
+  print_endline (string_of_int r.bar);
+  ()

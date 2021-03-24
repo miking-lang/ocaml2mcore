@@ -1,0 +1,4 @@
+mexpr
+let foo = lam x. lam y.
+  addi x y
+in 42

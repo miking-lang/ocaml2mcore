@@ -1,0 +1,11 @@
+module Foo = struct
+  type rec_type = {foo : int -> int; bar : int}
+end
+
+open Foo
+
+let _ =
+  let r = {foo = (fun x -> x + 2); bar = 3} in
+  print_endline (string_of_int (r.foo 40));
+  print_endline (string_of_int r.bar);
+  ()

@@ -1,0 +1,26 @@
+let foo x =
+  match x with
+    1 -> "1"
+  | 2 -> "2"
+  | 3 -> "3"
+  | 4 -> "4"
+  | 5 -> "5"
+  | 6 -> "6"
+  | 7 -> "7"
+  | 8 -> "8"
+  | 9 -> "9"
+  | 10 -> "10"
+  | _ -> "Not between 1 and 10"
+
+let _ =
+  foo 1 |> print_endline;
+  foo 2 |> print_endline;
+  foo 3 |> print_endline;
+  foo 4 |> print_endline;
+  foo 5 |> print_endline;
+  foo 6 |> print_endline;
+  foo 7 |> print_endline;
+  foo 8 |> print_endline;
+  foo 9 |> print_endline;
+  foo 10 |> print_endline;
+  foo 100 |> print_endline;

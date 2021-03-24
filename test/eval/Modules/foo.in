@@ -1,0 +1,8 @@
+module Foo = struct
+  let foo x y = x + y
+end
+
+let v = Foo.foo 1 2
+
+let _ =
+  print_endline (string_of_int v)

@@ -1,0 +1,6 @@
+let printBool b =
+  print_endline(if b then "true" else "false")
+
+let _ =
+  printBool (not true);
+  printBool (not false)
