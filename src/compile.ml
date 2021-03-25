@@ -57,11 +57,35 @@ let int2string =
 
 let include_int2string = ref false
 
+let string2int =
+  "let head = lam seq. get seq 0\n\n\
+   let tail = lam seq. subsequence seq 1 (subi (length seq) 1)\n\n\
+   let string2int = lam s.\n\
+  \  recursive\n\
+  \  let string2int_rechelper = lam s.\n\
+  \    let len = length s in\n\
+  \    let last = subi len 1 in\n\
+  \    if eqi len 0\n\
+  \    then 0\n\
+  \    else\n\
+  \      let lsd = subi (char2int (get s last)) (char2int '0') in\n\
+  \      let rest = muli 10 (string2int_rechelper (subsequence s 0 last)) in\n\
+  \      addi rest lsd\n\
+  \  in\n\
+  \  match s with [] then 0 else\n\
+  \  if eqc '-' (head s)\n\
+  \  then negi (string2int_rechelper (tail s))\n\
+  \  else string2int_rechelper s\n"
+
+let include_string2int = ref false
+
 let prelude () =
   String.concat ""
     (List.map
        (fun (r, f) -> if !r then f ^ "\n" else "")
-       [(include_print_ln, print_ln); (include_int2string, int2string)] )
+       [ (include_print_ln, print_ln)
+       ; (include_int2string, int2string)
+       ; (include_string2int, string2int) ] )
 
 (* Global set of MCore files to include *)
 let includes_ref = ref SS.empty
@@ -340,8 +364,15 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Prunstack | Pperform | Presume | Preperform ->
       failwith "Context swith operations not implemented"
   (* External call *)
+  | Pccall {prim_name= "caml_int_of_string"} -> (
+    match args with
+    | [a] ->
+        include_string2int := true ;
+        TmApp (NoInfo, mk_var "" "string2int", a)
+    | _ ->
+        failwith "Expected one argument to caml_int_of_string" )
   | Pccall desc ->
-      failwith "External calls not implemented"
+      failwith ("External call " ^ desc.prim_name ^ " not implemented")
   (* Exceptions *)
   | Praise raise_kind ->
       failwith "Raise not implemented"
@@ -429,6 +460,7 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pdivfloat ->
       mk_constapp2 (Cdivf None) args
   | Pabsfloat ->
+      (* TODO(linnea, 2021-03-24): Rediscover this pattern in OCaml compiler *)
       (* if 0.0 <= f then f else -f *)
       TmMatch
         ( NoInfo
