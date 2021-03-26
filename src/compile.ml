@@ -79,6 +79,10 @@ let tyvar_ s = TyVar (NoInfo, from_utf8 s, Symb.Helpers.nosym)
 
 let tyunknown_ = TyUnknown NoInfo
 
+let pcon_ c p = PatCon (NoInfo, from_utf8 c, Symb.Helpers.nosym, p)
+
+let pnamed_ s = PatNamed (NoInfo, NameStr (from_utf8 s, Symb.Helpers.nosym))
+
 let mk_tuple fields =
   let rec work n binds = function
     | [] ->
@@ -221,6 +225,8 @@ let get_error_handler n = IM.find_opt n !error_handlers
 (* Set of global type declarations *)
 let typedecl = ref (SM.empty : tm SM.t)
 
+let get_con tag = "TAG" ^ string_of_int tag
+
 let add_tagged tag binds =
   let t =
     TmConDef
@@ -231,6 +237,13 @@ let add_tagged tag binds =
       , record_ [] )
   in
   typedecl := SM.add tag t !typedecl
+
+let get_tagged_type tag =
+  match SM.find (get_con tag) !typedecl with
+  | TmConDef (_, _, _, TyArrow (_, from, _), _) ->
+      from
+  | t ->
+      failwith ("Unexpected binding in typedecl: " ^ pprint_mcore t)
 
 let remove_suffix suffix str =
   String.sub str 0 (String.length str - String.length suffix)
@@ -329,7 +342,7 @@ let rec compile_structured_constant = function
          be other cases where it does not work though. *)
       (* TODO(Linnea, 2021-03-17): First try to construct a cons list. *)
       let consts = List.map compile_structured_constant str_const_list in
-      let con_tag = "TAG" ^ string_of_int tag in
+      let con_tag = get_con tag in
       add_tagged con_tag
         (List.mapi (fun i _ -> (int2ustring i, tyunknown_)) str_const_list) ;
       TmConApp (NoInfo, from_utf8 con_tag, Symb.Helpers.nosym, mk_tuple consts)
@@ -734,12 +747,27 @@ and lambda2mcore (lam : Lambda.program) =
           let rec mk_tag_matches var = function
             | [] ->
                 TmNever NoInfo
-            | (n, branch) :: xs ->
+            | (tag, branch) :: xs ->
+              let ty = get_tagged_type tag in
+              let var_str =(
+                match var with
+                | TmVar (_, us, _) -> us
+                | _ -> failwith ("Expected TmVar, got " ^ (pprint_mcore var))
+              ) in
+              let ann inexpr =
+                TmLet
+                  ( NoInfo
+                  , var_str
+                  , Symb.Helpers.nosym
+                  , ty
+                  , mk_var "" "t"
+                  , inexpr )
+                in
                 TmMatch
                   ( NoInfo
                   , var
-                  , precord_ [(from_utf8 "tag", pint_ n)]
-                  , lambda2mcore' m branch
+                  , pcon_ (get_con tag) (pnamed_ "t")
+                  , ann (lambda2mcore' m branch)
                   , mk_tag_matches var xs )
           in
           mk_tag_matches (lambda2mcore' m arg) sw.sw_blocks )
