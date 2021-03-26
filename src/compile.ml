@@ -258,7 +258,7 @@ let get_typedecl () =
   | [] ->
       ""
   | _ ->
-      String.concat "\n" ("type Tagged" :: constr)
+      String.concat "\n" ("type Tagged" :: constr) ^ "\n"
 
 (* Get the module name from a fully qualified identifier *)
 let get_module ident =
@@ -337,10 +337,11 @@ let rec compile_structured_constant = function
       true_
   | Const_pointer _ ->
       failwith "const_pointer"
-  | Const_block (tag, str_const_list) ->
-      (* NOTE(Linnea, 2021-03-17): Converting into tuple works for records, might
-         be other cases where it does not work though. *)
-      (* TODO(Linnea, 2021-03-17): First try to construct a cons list. *)
+  | Const_block (tag, str_const_list, Tag_record) ->
+      let consts = List.map compile_structured_constant str_const_list in
+      mk_tuple consts
+  | Const_block (tag, str_const_list, Tag_none) ->
+      (* TODO(Linnea, 2021-03-17): First try to construct a cons list for Const_block. *)
       let consts = List.map compile_structured_constant str_const_list in
       let con_tag = get_con tag in
       add_tagged con_tag
@@ -402,13 +403,14 @@ let rec compile_primitive (p : Lambda.primitive) args =
         (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
            way. *)
         mk_var "" s )
-  | Pfield (n, Immediate, Immutable, Frecord_access _)
-  | Pfield (n, Pointer, Immutable, Frecord_access _) -> (
-    match args with
-    | [r] ->
-        mk_tuple_proj n r
-    | _ ->
-        failwith "Expected one argument to Pfield immediate" )
+  | Pfield (n, Immediate, Immutable, Frecord_access s)
+  | Pfield (n, Pointer, Immutable, Frecord_access s) -> (
+      print_endline s ;
+      match args with
+      | [r] ->
+          mk_tuple_proj n r
+      | _ ->
+          failwith "Expected one argument to Pfield immediate" )
   | Pfield (n, Pointer, Immutable, _) -> (
     (* NOTE(Linnea, 2021-03-26): Assume for now it's an access in a tagged
        structure *)
@@ -748,20 +750,22 @@ and lambda2mcore (lam : Lambda.program) =
             | [] ->
                 TmNever NoInfo
             | (tag, branch) :: xs ->
-              let ty = get_tagged_type tag in
-              let var_str =(
-                match var with
-                | TmVar (_, us, _) -> us
-                | _ -> failwith ("Expected TmVar, got " ^ (pprint_mcore var))
-              ) in
-              let ann inexpr =
-                TmLet
-                  ( NoInfo
-                  , var_str
-                  , Symb.Helpers.nosym
-                  , ty
-                  , mk_var "" "t"
-                  , inexpr )
+                let ty = get_tagged_type tag in
+                let var_str =
+                  match var with
+                  | TmVar (_, us, _) ->
+                      us
+                  | _ ->
+                      failwith ("Expected TmVar, got " ^ pprint_mcore var)
+                in
+                let ann inexpr =
+                  TmLet
+                    ( NoInfo
+                    , var_str
+                    , Symb.Helpers.nosym
+                    , ty
+                    , mk_var "" "t"
+                    , inexpr )
                 in
                 TmMatch
                   ( NoInfo
