@@ -12,6 +12,7 @@ open Asttypes
 
 module SS = Set.Make (String)
 module IM = Map.Make (Int)
+module SM = Map.Make (String)
 
 (* Command line options *)
 let enable_debug_parsed = ref false
@@ -33,6 +34,113 @@ let modulename = "Test"
 
 (* MCore no-op instruction *)
 let mcore_noop = tmUnit
+
+(* Pretty print an MExpr AST *)
+let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
+
+(* AST helper functions *)
+let int2ustring = Boot.Ustring.Op.ustring_of_int
+
+let mk_ident m ident = from_utf8 (m ^ Ident.name ident)
+
+let mk_string str =
+  TmSeq
+    ( NoInfo
+    , Mseq.Helpers.map
+        (fun x -> TmConst (NoInfo, CChar x))
+        (from_latin1 str |> Mseq.Helpers.of_ustring) )
+
+let mk_let ident body inexpr =
+  TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
+
+let mk_lam ident body =
+  TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
+
+let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
+
+let mk_ite cnd thn els = TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
+
+let mk_var m s = TmVar (NoInfo, from_utf8 (m ^ s), Symb.Helpers.nosym)
+
+let mk_var_ident m ident = mk_var m (Ident.name ident)
+
+let record_from_list binds =
+  List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
+
+let record_ binds = TmRecord (NoInfo, record_from_list binds)
+
+let tyrecord_ binds = TyRecord (NoInfo, record_from_list binds)
+
+let precord_ binds = PatRecord (NoInfo, record_from_list binds)
+
+let tyarrow_ l h = TyArrow (NoInfo, l, h)
+
+let tyvar_ s = TyVar (NoInfo, from_utf8 s, Symb.Helpers.nosym)
+
+let tyunknown_ = TyUnknown NoInfo
+
+let mk_tuple fields =
+  let rec work n binds = function
+    | [] ->
+        record_ binds
+    | x :: xs ->
+        work (n + 1) ((int2ustring n, x) :: binds) xs
+  in
+  work 0 [] fields
+
+let mk_tuple_proj n r =
+  TmMatch
+    ( NoInfo
+    , r
+    , PatRecord
+        ( NoInfo
+        , record_from_list
+            [ ( int2ustring n
+              , PatNamed (NoInfo, NameStr (from_utf8 "x", Symb.Helpers.nosym))
+              ) ] )
+    , mk_var "" "x"
+    , TmNever NoInfo )
+
+let fail_constapp f args =
+  failwith
+    ( "Incorrect application. Function: "
+    ^ to_utf8 (ustring_of_const f)
+    ^ ", arguments: "
+    ^ String.concat " " (List.map (fun x -> ustring_of_tm x |> to_utf8) args)
+    )
+
+let mk_constapp1 op args =
+  match args with
+  | [a] ->
+      TmApp (NoInfo, TmConst (NoInfo, op), a)
+  | _ ->
+      fail_constapp op args
+
+let mk_constapp2 op args =
+  match args with
+  | [a1; a2] ->
+      TmApp (NoInfo, TmApp (NoInfo, TmConst (NoInfo, op), a1), a2)
+  | _ ->
+      fail_constapp op args
+
+let int_ = function
+  | i when i < 0 ->
+      (* NOTE(Linnea, 2021-03-17): Use negi to ensure parsability *)
+      TmApp (NoInfo, TmConst (NoInfo, Cnegi), TmConst (NoInfo, CInt (-i)))
+  | i ->
+      TmConst (NoInfo, CInt i)
+
+let pint_ n = PatInt (NoInfo, n)
+
+let true_ = TmConst (NoInfo, CBool true)
+
+let false_ = TmConst (NoInfo, CBool false)
+
+let land_ b1 b2 = mk_ite b1 b2 false_
+
+let lor_ b1 b2 = mk_ite b1 true_ b2
+
+let not_ b = mk_ite b false_ true_
 
 (* Prelude *)
 (* TODO(linnea, 2021-03-19): Some (all?) of these functions should be included
@@ -110,6 +218,35 @@ let add_error_handler n handler =
 
 let get_error_handler n = IM.find_opt n !error_handlers
 
+(* Set of global type declarations *)
+let typedecl = ref (SM.empty : tm SM.t)
+
+let add_tagged tag binds =
+  let t =
+    TmConDef
+      ( NoInfo
+      , from_utf8 tag
+      , Symb.Helpers.nosym
+      , tyarrow_ (tyrecord_ binds) (tyvar_ "Tagged")
+      , record_ [] )
+  in
+  typedecl := SM.add tag t !typedecl
+
+let remove_suffix suffix str =
+  String.sub str 0 (String.length str - String.length suffix)
+
+let get_typedecl () =
+  let constr =
+    List.map
+      (fun (_, v) -> pprint_mcore v |> remove_suffix " in ()")
+      (SM.bindings !typedecl)
+  in
+  match constr with
+  | [] ->
+      ""
+  | _ ->
+      String.concat "\n" ("type Tagged" :: constr)
+
 (* Get the module name from a fully qualified identifier *)
 let get_module ident =
   String.split_on_char '.' ident
@@ -151,105 +288,6 @@ let typed2lambda typed =
   else () ;
   lamprog
 
-(* Pretty print an MExpr AST *)
-let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
-
-(* AST helper functions *)
-let int2ustring = Boot.Ustring.Op.ustring_of_int
-
-let mk_ident m ident = from_utf8 (m ^ Ident.name ident)
-
-let mk_string str =
-  TmSeq
-    ( NoInfo
-    , Mseq.Helpers.map
-        (fun x -> TmConst (NoInfo, CChar x))
-        (from_latin1 str |> Mseq.Helpers.of_ustring) )
-
-let mk_let ident body inexpr =
-  TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
-
-let mk_lam ident body =
-  TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
-
-let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
-
-let mk_ite cnd thn els = TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
-
-let mk_var m s = TmVar (NoInfo, from_utf8 (m ^ s), Symb.Helpers.nosym)
-
-let mk_var_ident m ident = mk_var m (Ident.name ident)
-
-let record_from_list binds =
-  List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
-
-let record_ binds = TmRecord (NoInfo, record_from_list binds)
-
-let precord_ binds = PatRecord (NoInfo, record_from_list binds)
-
-let mk_tuple fields =
-  let rec work n binds = function
-    | [] ->
-        record_ binds
-    | x :: xs ->
-        work (n + 1) ((int2ustring n, x) :: binds) xs
-  in
-  work 0 [] fields
-
-let mk_tuple_proj n r =
-  TmMatch
-    ( NoInfo
-    , r
-    , PatRecord
-        ( NoInfo
-        , record_from_list
-            [ ( int2ustring n
-              , PatNamed (NoInfo, NameStr (from_utf8 "x", Symb.Helpers.nosym))
-              ) ] )
-    , mk_var "" "x"
-    , TmNever NoInfo )
-
-let fail_constapp f args =
-  failwith
-    ( "Incorrect application. Function: "
-    ^ to_utf8 (ustring_of_const f)
-    ^ ", arguments: "
-    ^ String.concat " " (List.map (fun x -> ustring_of_tm x |> to_utf8) args)
-    )
-
-let mk_constapp1 op args =
-  match args with
-  | [a] ->
-      TmApp (NoInfo, TmConst (NoInfo, op), a)
-  | _ ->
-      fail_constapp op args
-
-let mk_constapp2 op args =
-  match args with
-  | [a1; a2] ->
-      TmApp (NoInfo, TmApp (NoInfo, TmConst (NoInfo, op), a1), a2)
-  | _ ->
-      fail_constapp op args
-
-let int_ = function
-  | i when i < 0 ->
-      (* NOTE(Linnea, 2021-03-17): Use negi to ensure parsability *)
-      TmApp (NoInfo, TmConst (NoInfo, Cnegi), TmConst (NoInfo, CInt (-i)))
-  | i ->
-      TmConst (NoInfo, CInt i)
-
-let pint_ n = PatInt (NoInfo, n)
-
-let true_ = TmConst (NoInfo, CBool true)
-
-let false_ = TmConst (NoInfo, CBool false)
-
-let land_ b1 b2 = mk_ite b1 b2 false_
-
-let lor_ b1 b2 = mk_ite b1 true_ b2
-
-let not_ b = mk_ite b false_ true_
-
 (* Compile a Lambda constant *)
 let compile_constant = function
   | Const_int i ->
@@ -290,12 +328,11 @@ let rec compile_structured_constant = function
       (* NOTE(Linnea, 2021-03-17): Converting into tuple works for records, might
          be other cases where it does not work though. *)
       (* TODO(Linnea, 2021-03-17): First try to construct a cons list. *)
-      let consts =
-        List.mapi
-          (fun i c -> (int2ustring i, compile_structured_constant c))
-          str_const_list
-      in
-      record_ ((from_utf8 "tag", int_ tag) :: consts)
+      let consts = List.map compile_structured_constant str_const_list in
+      let con_tag = "TAG" ^ string_of_int tag in
+      add_tagged con_tag
+        (List.mapi (fun i _ -> (int2ustring i, tyunknown_)) str_const_list) ;
+      TmConApp (NoInfo, from_utf8 con_tag, Symb.Helpers.nosym, mk_tuple consts)
   | Const_float_array _ ->
       failwith "float_array"
   | Const_immstring _ ->
@@ -799,6 +836,7 @@ let ocaml2mcore filename =
   in
   let includes = String.concat "\n" (SS.elements !includes_ref) in
   let full_prog =
-    String.concat "\n" [includes; prelude (); "mexpr"; mcore_prog]
+    String.concat "\n"
+      [includes; get_typedecl (); prelude (); "mexpr"; mcore_prog]
   in
   to_output full_prog ; mcore_compile full_prog
