@@ -183,12 +183,14 @@ let mk_var_ident m ident = mk_var m (Ident.name ident)
 let record_from_list binds =
   List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
 
-let mk_record binds = TmRecord (NoInfo, record_from_list binds)
+let record_ binds = TmRecord (NoInfo, record_from_list binds)
+
+let precord_ binds = PatRecord (NoInfo, record_from_list binds)
 
 let mk_tuple fields =
   let rec work n binds = function
     | [] ->
-        mk_record binds
+        record_ binds
     | x :: xs ->
         work (n + 1) ((int2ustring n, x) :: binds) xs
   in
@@ -236,6 +238,8 @@ let int_ = function
   | i ->
       TmConst (NoInfo, CInt i)
 
+let pint_ n = PatInt (NoInfo, n)
+
 let true_ = TmConst (NoInfo, CBool true)
 
 let false_ = TmConst (NoInfo, CBool false)
@@ -282,12 +286,16 @@ let rec compile_structured_constant = function
       true_
   | Const_pointer _ ->
       failwith "const_pointer"
-  | Const_block (_tag, str_const_list) ->
+  | Const_block (tag, str_const_list) ->
       (* NOTE(Linnea, 2021-03-17): Converting into tuple works for records, might
          be other cases where it does not work though. *)
       (* TODO(Linnea, 2021-03-17): First try to construct a cons list. *)
-      let consts = List.map compile_structured_constant str_const_list in
-      mk_tuple consts
+      let consts =
+        List.mapi
+          (fun i c -> (int2ustring i, compile_structured_constant c))
+          str_const_list
+      in
+      record_ ((from_utf8 "tag", int_ tag) :: consts)
   | Const_float_array _ ->
       failwith "float_array"
   | Const_immstring _ ->
@@ -346,6 +354,14 @@ let rec compile_primitive (p : Lambda.primitive) args =
         mk_var "" s )
   | Pfield (n, Immediate, Immutable, Frecord_access _)
   | Pfield (n, Pointer, Immutable, Frecord_access _) -> (
+    match args with
+    | [r] ->
+        mk_tuple_proj n r
+    | _ ->
+        failwith "Expected one argument to Pfield immediate" )
+  | Pfield (n, Pointer, Immutable, _) -> (
+    (* NOTE(Linnea, 2021-03-26): Assume for now it's an access in a tagged
+       structure *)
     match args with
     | [r] ->
         mk_tuple_proj n r
@@ -674,22 +690,35 @@ and lambda2mcore (lam : Lambda.program) =
           , lambda2mcore' m thn
           , lambda2mcore' m els )
     | Lswitch (arg, sw, _loc) ->
-        if sw.sw_numblocks > 0 then failwith "switch with blocks not supported"
-        else if Option.is_some sw.sw_failaction then
+        if Option.is_some sw.sw_failaction then
           failwith "switch failaction not supported"
-        else
-          let rec mk_matches var = function
+        else if sw.sw_numblocks > 0 then (
+          assert (sw.sw_numconsts = 0) ;
+          let rec mk_tag_matches var = function
             | [] ->
                 TmNever NoInfo
             | (n, branch) :: xs ->
                 TmMatch
                   ( NoInfo
                   , var
-                  , PatInt (NoInfo, n)
+                  , precord_ [(from_utf8 "tag", pint_ n)]
                   , lambda2mcore' m branch
-                  , mk_matches var xs )
+                  , mk_tag_matches var xs )
           in
-          mk_matches (lambda2mcore' m arg) sw.sw_consts
+          mk_tag_matches (lambda2mcore' m arg) sw.sw_blocks )
+        else
+          let rec mk_int_matches var = function
+            | [] ->
+                TmNever NoInfo
+            | (n, branch) :: xs ->
+                TmMatch
+                  ( NoInfo
+                  , var
+                  , pint_ n
+                  , lambda2mcore' m branch
+                  , mk_int_matches var xs )
+          in
+          mk_int_matches (lambda2mcore' m arg) sw.sw_consts
     (* NOTE(Linnea, 2021-03-09): Many lambda program are wrapped in a sequence
        operator with an empty makeblock node as rhs. To get nicer output we
        simply ignore this empty block (otherwise the program would end with
@@ -748,13 +777,15 @@ let mcore_compile str =
     | Some mcore_stdlib ->
         (* Write output to temporary file *)
         let ocaml_out_prefix =
-          if !output_file = "stdout" then "prog" else ocaml_out_file !output_file
+          if !output_file = "stdout" then "prog"
+          else ocaml_out_file !output_file
         in
         let oc = open_out (ocaml_out_prefix ^ ".mc") in
         fprintf oc "%s\n" str ;
         close_out oc ;
         Sys.command
-          (sprintf "mi %s/../src/main/mi.mc -- compile %s.mc" mcore_stdlib ocaml_out_prefix)
+          (sprintf "mi %s/../src/main/mi.mc -- compile %s.mc" mcore_stdlib
+             ocaml_out_prefix )
         |> ignore
     | None ->
         failwith "Source-to-source compilation requires MCORE_STDLIB to be set"
