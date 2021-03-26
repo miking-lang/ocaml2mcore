@@ -9,7 +9,7 @@ set -l tmpdir (mktemp -d)
 set -l comp_out $tmpdir"/comp.out"
 set -l comp_err $tmpdir"/comp.err"
 
-set -l prog $tmpdir"/comp"
+set -l prog "./comp"
 
 set -l prog_out $tmpdir"/prog.out"
 set -l prog_err $tmpdir"/prog.err"

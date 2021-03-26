@@ -728,6 +728,13 @@ and lambda2mcore (lam : Lambda.program) =
   in
   lambda2mcore' "" lam.code
 
+let ocaml_out_file f =
+  match Filename.chop_suffix_opt ".mc" f with
+  | Some s ->
+      s
+  | None ->
+      filename ^ ".out"
+
 let to_output str =
   let outfile = !output_file in
   if outfile = "stdout" then print_endline str
@@ -740,11 +747,14 @@ let mcore_compile str =
     match Sys.getenv_opt "MCORE_STDLIB" with
     | Some mcore_stdlib ->
         (* Write output to temporary file *)
-        let oc = open_out "prog.mc" in
+        let ocaml_out_prefix =
+          if !output_file = "stdout" then "prog" else ocaml_out_file !output_file
+        in
+        let oc = open_out (ocaml_out_prefix ^ ".mc") in
         fprintf oc "%s\n" str ;
         close_out oc ;
         Sys.command
-          ("mi " ^ mcore_stdlib ^ "/../src/main/mi.mc -- compile prog.mc")
+          (sprintf "mi %s/../src/main/mi.mc -- compile %s.mc" mcore_stdlib ocaml_out_prefix)
         |> ignore
     | None ->
         failwith "Source-to-source compilation requires MCORE_STDLIB to be set"
