@@ -1,0 +1,6 @@
+Compile records
+TODO:
+- Inline records
+- Mutable records
+- Record extension
+- Record with one only floats (compiled into float arrays)

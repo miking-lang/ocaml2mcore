@@ -1,0 +1,10 @@
+type r = {foo : float; bar : int}
+
+let _ =
+  let r = {foo = 1.0; bar = 42} in
+  let w = {r with bar = 7} in
+
+  print_endline (string_of_int r.bar);
+  print_endline (string_of_int w.bar);
+
+  ()
