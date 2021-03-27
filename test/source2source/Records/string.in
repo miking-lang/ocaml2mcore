@@ -1,0 +1,6 @@
+type r = {foo : int; bar : string}
+
+let _ =
+  let r = {foo = 3; bar = "hello"} in
+  print_endline (string_of_int (r.foo));
+  print_endline (r.bar)
