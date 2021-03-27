@@ -40,14 +40,19 @@ if test $has_failed -ne 1
     command         mi $miking_dir/src/main/mi.mc -- compile $comp_out
     set code $status
 
+    echo "Program:" 1>&2
+    echo "```" 1>&2
+    $prog 1>$prog_out 2>$prog_err
+    echo "```" 1>&2
+
     echo "Stderr (ignored):" 1>&2
     echo "```" 1>&2
     cat $prog_err 1>&2
     echo "```" 1>&2
 
-    echo "Program:" 1>&2
+    echo "Stdout:" 1>&2
     echo "```" 1>&2
-    $prog 1>$prog_out 2>$prog_err
+    cat $prog_out 1>&2
     echo "```" 1>&2
 
     # NOTE(vipa, 2020-11-24): This should go to stdout, that's intentional

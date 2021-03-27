@@ -403,9 +403,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
         (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
            way. *)
         mk_var "" s )
-  | Pfield (n, Immediate, Immutable, Frecord_access s)
-  | Pfield (n, Pointer, Immutable, Frecord_access s) -> (
-      print_endline s ;
+  | Pfield (n, Immediate, Immutable, Frecord_access _)
+  | Pfield (n, Pointer, Immutable, Frecord_access _) -> (
       match args with
       | [r] ->
           mk_tuple_proj n r
