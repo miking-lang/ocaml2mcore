@@ -405,11 +405,11 @@ let rec compile_primitive (p : Lambda.primitive) args =
         mk_var "" s )
   | Pfield (n, Immediate, Immutable, Frecord_access _)
   | Pfield (n, Pointer, Immutable, Frecord_access _) -> (
-      match args with
-      | [r] ->
-          mk_tuple_proj n r
-      | _ ->
-          failwith "Expected one argument to Pfield immediate" )
+    match args with
+    | [r] ->
+        mk_tuple_proj n r
+    | _ ->
+        failwith "Expected one argument to Pfield immediate" )
   | Pfield (n, Pointer, Immutable, _) -> (
     (* NOTE(Linnea, 2021-03-26): Assume for now it's an access in a tagged
        structure *)
