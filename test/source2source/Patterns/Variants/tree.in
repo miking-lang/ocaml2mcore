@@ -1,0 +1,23 @@
+type tree =
+    Node of int * tree * tree
+  | Leaf of int
+
+let rec exists5 tree =
+  match tree with
+  | Leaf v -> v = 5
+  | Node (v, left, right) ->
+    v = 5 || (exists5 left) || (exists5 right)
+
+let print_bool b =
+  if b then
+    print_endline "true"
+  else
+    print_endline "false"
+
+let _ =
+  let t = Node (1, Leaf 2, Leaf 3) in
+  print_bool (exists5 t);
+  let t = Node (1, Node (3, Leaf 42, Leaf 42), Leaf 3) in
+  print_bool (exists5 t);
+  let t = Node (1, Node (3, Leaf 42, Leaf 5), Leaf 3) in
+  print_bool (exists5 t);

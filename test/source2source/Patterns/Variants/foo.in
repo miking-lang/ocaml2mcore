@@ -1,0 +1,15 @@
+type hello =
+    Foo of int * hello
+  | Bar of int
+
+let rec sum = function
+  | Bar v -> v
+  | Foo (v, t) ->
+    v + sum t
+
+let _ =
+  let bar = Bar 3 in
+  let foo = Foo (40, Bar 2) in
+  print_endline (string_of_int (sum bar));
+  print_endline (string_of_int (sum foo));
+  ()

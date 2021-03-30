@@ -1,0 +1,7 @@
+type rec_type = {foo : int; bar : int}
+
+let _ =
+  let r = {foo = 2; bar = 3} in
+  print_endline (string_of_int r.foo);
+  print_endline (string_of_int r.bar);
+  ()

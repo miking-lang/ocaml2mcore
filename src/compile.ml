@@ -12,6 +12,7 @@ open Asttypes
 
 module SS = Set.Make (String)
 module IM = Map.Make (Int)
+module SM = Map.Make (String)
 
 (* Command line options *)
 let enable_debug_parsed = ref false
@@ -33,6 +34,117 @@ let modulename = "Test"
 
 (* MCore no-op instruction *)
 let mcore_noop = tmUnit
+
+(* Pretty print an MExpr AST *)
+let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
+
+(* AST helper functions *)
+let int2ustring = Boot.Ustring.Op.ustring_of_int
+
+let mk_ident m ident = from_utf8 (m ^ Ident.name ident)
+
+let mk_string str =
+  TmSeq
+    ( NoInfo
+    , Mseq.Helpers.map
+        (fun x -> TmConst (NoInfo, CChar x))
+        (from_latin1 str |> Mseq.Helpers.of_ustring) )
+
+let mk_let ident body inexpr =
+  TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
+
+let mk_lam ident body =
+  TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
+
+let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
+
+let mk_ite cnd thn els = TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
+
+let mk_var m s = TmVar (NoInfo, from_utf8 (m ^ s), Symb.Helpers.nosym)
+
+let mk_var_ident m ident = mk_var m (Ident.name ident)
+
+let record_from_list binds =
+  List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
+
+let record_ binds = TmRecord (NoInfo, record_from_list binds)
+
+let tyrecord_ binds = TyRecord (NoInfo, record_from_list binds)
+
+let precord_ binds = PatRecord (NoInfo, record_from_list binds)
+
+let tyarrow_ l h = TyArrow (NoInfo, l, h)
+
+let tyvar_ s = TyVar (NoInfo, from_utf8 s, Symb.Helpers.nosym)
+
+let tyunknown_ = TyUnknown NoInfo
+
+let pcon_ c p = PatCon (NoInfo, from_utf8 c, Symb.Helpers.nosym, p)
+
+let pnamed_ s = PatNamed (NoInfo, NameStr (from_utf8 s, Symb.Helpers.nosym))
+
+let mk_tuple fields =
+  let rec work n binds = function
+    | [] ->
+        record_ binds
+    | x :: xs ->
+        work (n + 1) ((int2ustring n, x) :: binds) xs
+  in
+  work 0 [] fields
+
+let mk_tuple_proj n r =
+  TmMatch
+    ( NoInfo
+    , r
+    , PatRecord
+        ( NoInfo
+        , record_from_list
+            [ ( int2ustring n
+              , PatNamed (NoInfo, NameStr (from_utf8 "x", Symb.Helpers.nosym))
+              ) ] )
+    , mk_var "" "x"
+    , TmNever NoInfo )
+
+let fail_constapp f args =
+  failwith
+    ( "Incorrect application. Function: "
+    ^ to_utf8 (ustring_of_const f)
+    ^ ", arguments: "
+    ^ String.concat " " (List.map (fun x -> ustring_of_tm x |> to_utf8) args)
+    )
+
+let mk_constapp1 op args =
+  match args with
+  | [a] ->
+      TmApp (NoInfo, TmConst (NoInfo, op), a)
+  | _ ->
+      fail_constapp op args
+
+let mk_constapp2 op args =
+  match args with
+  | [a1; a2] ->
+      TmApp (NoInfo, TmApp (NoInfo, TmConst (NoInfo, op), a1), a2)
+  | _ ->
+      fail_constapp op args
+
+let int_ = function
+  | i when i < 0 ->
+      (* NOTE(Linnea, 2021-03-17): Use negi to ensure parsability *)
+      TmApp (NoInfo, TmConst (NoInfo, Cnegi), TmConst (NoInfo, CInt (-i)))
+  | i ->
+      TmConst (NoInfo, CInt i)
+
+let pint_ n = PatInt (NoInfo, n)
+
+let true_ = TmConst (NoInfo, CBool true)
+
+let false_ = TmConst (NoInfo, CBool false)
+
+let land_ b1 b2 = mk_ite b1 b2 false_
+
+let lor_ b1 b2 = mk_ite b1 true_ b2
+
+let not_ b = mk_ite b false_ true_
 
 (* Prelude *)
 (* TODO(linnea, 2021-03-19): Some (all?) of these functions should be included
@@ -110,6 +222,44 @@ let add_error_handler n handler =
 
 let get_error_handler n = IM.find_opt n !error_handlers
 
+(* Set of global type declarations *)
+let typedecl = ref (SM.empty : tm SM.t)
+
+let get_con tag = "TAG" ^ string_of_int tag
+
+let add_tagged tag binds =
+  let t =
+    TmConDef
+      ( NoInfo
+      , from_utf8 tag
+      , Symb.Helpers.nosym
+      , tyarrow_ (tyrecord_ binds) (tyvar_ "Tagged")
+      , record_ [] )
+  in
+  typedecl := SM.add tag t !typedecl
+
+let get_tagged_type tag =
+  match SM.find (get_con tag) !typedecl with
+  | TmConDef (_, _, _, TyArrow (_, from, _), _) ->
+      from
+  | t ->
+      failwith ("Unexpected binding in typedecl: " ^ pprint_mcore t)
+
+let remove_suffix suffix str =
+  String.sub str 0 (String.length str - String.length suffix)
+
+let get_typedecl () =
+  let constr =
+    List.map
+      (fun (_, v) -> pprint_mcore v |> remove_suffix " in ()")
+      (SM.bindings !typedecl)
+  in
+  match constr with
+  | [] ->
+      ""
+  | _ ->
+      String.concat "\n" ("type Tagged" :: constr) ^ "\n"
+
 (* Get the module name from a fully qualified identifier *)
 let get_module ident =
   String.split_on_char '.' ident
@@ -151,101 +301,6 @@ let typed2lambda typed =
   else () ;
   lamprog
 
-(* Pretty print an MExpr AST *)
-let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
-
-(* AST helper functions *)
-let int2ustring = Boot.Ustring.Op.ustring_of_int
-
-let mk_ident m ident = from_utf8 (m ^ Ident.name ident)
-
-let mk_string str =
-  TmSeq
-    ( NoInfo
-    , Mseq.Helpers.map
-        (fun x -> TmConst (NoInfo, CChar x))
-        (from_latin1 str |> Mseq.Helpers.of_ustring) )
-
-let mk_let ident body inexpr =
-  TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
-
-let mk_lam ident body =
-  TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
-
-let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
-
-let mk_ite cnd thn els = TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
-
-let mk_var m s = TmVar (NoInfo, from_utf8 (m ^ s), Symb.Helpers.nosym)
-
-let mk_var_ident m ident = mk_var m (Ident.name ident)
-
-let record_from_list binds =
-  List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
-
-let mk_record binds = TmRecord (NoInfo, record_from_list binds)
-
-let mk_tuple fields =
-  let rec work n binds = function
-    | [] ->
-        mk_record binds
-    | x :: xs ->
-        work (n + 1) ((int2ustring n, x) :: binds) xs
-  in
-  work 0 [] fields
-
-let mk_tuple_proj n r =
-  TmMatch
-    ( NoInfo
-    , r
-    , PatRecord
-        ( NoInfo
-        , record_from_list
-            [ ( int2ustring n
-              , PatNamed (NoInfo, NameStr (from_utf8 "x", Symb.Helpers.nosym))
-              ) ] )
-    , mk_var "" "x"
-    , TmNever NoInfo )
-
-let fail_constapp f args =
-  failwith
-    ( "Incorrect application. Function: "
-    ^ to_utf8 (ustring_of_const f)
-    ^ ", arguments: "
-    ^ String.concat " " (List.map (fun x -> ustring_of_tm x |> to_utf8) args)
-    )
-
-let mk_constapp1 op args =
-  match args with
-  | [a] ->
-      TmApp (NoInfo, TmConst (NoInfo, op), a)
-  | _ ->
-      fail_constapp op args
-
-let mk_constapp2 op args =
-  match args with
-  | [a1; a2] ->
-      TmApp (NoInfo, TmApp (NoInfo, TmConst (NoInfo, op), a1), a2)
-  | _ ->
-      fail_constapp op args
-
-let int_ = function
-  | i when i < 0 ->
-      (* NOTE(Linnea, 2021-03-17): Use negi to ensure parsability *)
-      TmApp (NoInfo, TmConst (NoInfo, Cnegi), TmConst (NoInfo, CInt (-i)))
-  | i ->
-      TmConst (NoInfo, CInt i)
-
-let true_ = TmConst (NoInfo, CBool true)
-
-let false_ = TmConst (NoInfo, CBool false)
-
-let land_ b1 b2 = mk_ite b1 b2 false_
-
-let lor_ b1 b2 = mk_ite b1 true_ b2
-
-let not_ b = mk_ite b false_ true_
-
 (* Compile a Lambda constant *)
 let compile_constant = function
   | Const_int i ->
@@ -282,12 +337,16 @@ let rec compile_structured_constant = function
       true_
   | Const_pointer _ ->
       failwith "const_pointer"
-  | Const_block (_tag, str_const_list) ->
-      (* NOTE(Linnea, 2021-03-17): Converting into tuple works for records, might
-         be other cases where it does not work though. *)
-      (* TODO(Linnea, 2021-03-17): First try to construct a cons list. *)
+  | Const_block (tag, str_const_list, Tag_record) ->
       let consts = List.map compile_structured_constant str_const_list in
       mk_tuple consts
+  | Const_block (tag, str_const_list, Tag_none) ->
+      (* TODO(Linnea, 2021-03-17): First try to construct a cons list for Const_block. *)
+      let consts = List.map compile_structured_constant str_const_list in
+      let con_tag = get_con tag in
+      add_tagged con_tag
+        (List.mapi (fun i _ -> (int2ustring i, tyunknown_)) str_const_list) ;
+      TmConApp (NoInfo, from_utf8 con_tag, Symb.Helpers.nosym, mk_tuple consts)
   | Const_float_array _ ->
       failwith "float_array"
   | Const_immstring _ ->
@@ -346,6 +405,14 @@ let rec compile_primitive (p : Lambda.primitive) args =
         mk_var "" s )
   | Pfield (n, Immediate, Immutable, Frecord_access _)
   | Pfield (n, Pointer, Immutable, Frecord_access _) -> (
+    match args with
+    | [r] ->
+        mk_tuple_proj n r
+    | _ ->
+        failwith "Expected one argument to Pfield immediate" )
+  | Pfield (n, Pointer, Immutable, _) -> (
+    (* NOTE(Linnea, 2021-03-26): Assume for now it's an access in a tagged
+       structure *)
     match args with
     | [r] ->
         mk_tuple_proj n r
@@ -674,22 +741,52 @@ and lambda2mcore (lam : Lambda.program) =
           , lambda2mcore' m thn
           , lambda2mcore' m els )
     | Lswitch (arg, sw, _loc) ->
-        if sw.sw_numblocks > 0 then failwith "switch with blocks not supported"
-        else if Option.is_some sw.sw_failaction then
+        if Option.is_some sw.sw_failaction then
           failwith "switch failaction not supported"
+        else if sw.sw_numblocks > 0 then (
+          assert (sw.sw_numconsts = 0) ;
+          let rec mk_tag_matches var = function
+            | [] ->
+                TmNever NoInfo
+            | (tag, branch) :: xs ->
+                let ty = get_tagged_type tag in
+                let var_str =
+                  match var with
+                  | TmVar (_, us, _) ->
+                      us
+                  | _ ->
+                      failwith ("Expected TmVar, got " ^ pprint_mcore var)
+                in
+                let ann inexpr =
+                  TmLet
+                    ( NoInfo
+                    , var_str
+                    , Symb.Helpers.nosym
+                    , ty
+                    , mk_var "" "t"
+                    , inexpr )
+                in
+                TmMatch
+                  ( NoInfo
+                  , var
+                  , pcon_ (get_con tag) (pnamed_ "t")
+                  , ann (lambda2mcore' m branch)
+                  , mk_tag_matches var xs )
+          in
+          mk_tag_matches (lambda2mcore' m arg) sw.sw_blocks )
         else
-          let rec mk_matches var = function
+          let rec mk_int_matches var = function
             | [] ->
                 TmNever NoInfo
             | (n, branch) :: xs ->
                 TmMatch
                   ( NoInfo
                   , var
-                  , PatInt (NoInfo, n)
+                  , pint_ n
                   , lambda2mcore' m branch
-                  , mk_matches var xs )
+                  , mk_int_matches var xs )
           in
-          mk_matches (lambda2mcore' m arg) sw.sw_consts
+          mk_int_matches (lambda2mcore' m arg) sw.sw_consts
     (* NOTE(Linnea, 2021-03-09): Many lambda program are wrapped in a sequence
        operator with an empty makeblock node as rhs. To get nicer output we
        simply ignore this empty block (otherwise the program would end with
@@ -728,6 +825,13 @@ and lambda2mcore (lam : Lambda.program) =
   in
   lambda2mcore' "" lam.code
 
+let ocaml_out_file f =
+  match Filename.chop_suffix_opt ".mc" f with
+  | Some s ->
+      s
+  | None ->
+      filename ^ ".out"
+
 let to_output str =
   let outfile = !output_file in
   if outfile = "stdout" then print_endline str
@@ -740,11 +844,16 @@ let mcore_compile str =
     match Sys.getenv_opt "MCORE_STDLIB" with
     | Some mcore_stdlib ->
         (* Write output to temporary file *)
-        let oc = open_out "prog.mc" in
+        let ocaml_out_prefix =
+          if !output_file = "stdout" then "prog"
+          else ocaml_out_file !output_file
+        in
+        let oc = open_out (ocaml_out_prefix ^ ".mc") in
         fprintf oc "%s\n" str ;
         close_out oc ;
         Sys.command
-          ("mi " ^ mcore_stdlib ^ "/../src/main/mi.mc -- compile prog.mc")
+          (sprintf "mi %s/../src/main/mi.mc -- compile %s.mc" mcore_stdlib
+             ocaml_out_prefix )
         |> ignore
     | None ->
         failwith "Source-to-source compilation requires MCORE_STDLIB to be set"
@@ -758,6 +867,7 @@ let ocaml2mcore filename =
   in
   let includes = String.concat "\n" (SS.elements !includes_ref) in
   let full_prog =
-    String.concat "\n" [includes; prelude (); "mexpr"; mcore_prog]
+    String.concat "\n"
+      [includes; get_typedecl (); prelude (); "mexpr"; mcore_prog]
   in
   to_output full_prog ; mcore_compile full_prog
