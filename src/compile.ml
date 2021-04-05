@@ -328,11 +328,10 @@ let rec compile_structured_constant = function
       true_
   | Const_pointer _ ->
       failwith "const_pointer"
-  | Const_block (tag, str_const_list, Tag_record) ->
+  | Const_block (tag, str_const_list, (Tag_record | Tag_tuple)) ->
       let consts = List.map compile_structured_constant str_const_list in
       mk_tuple consts
   | Const_block (tag, str_const_list, Tag_con name) ->
-      (* TODO(Linnea, 2021-03-17): First try to construct a cons list for Const_block. *)
       let consts = List.map compile_structured_constant str_const_list in
       add_tagged_type name
         (List.mapi (fun i _ -> (int2ustring i, tyunknown_)) str_const_list) ;
@@ -395,8 +394,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
         (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
            way. *)
         mk_var "" s )
-  | Pfield (n, Immediate, Immutable, Frecord_access _)
-  | Pfield (n, Pointer, Immutable, Frecord_access _) -> (
+  | Pfield (n, (Pointer | Immediate), Immutable, (Frecord_access _ | Ftuple))
+    -> (
     match args with
     | [r] ->
         mk_tuple_proj n r
