@@ -317,20 +317,35 @@ let compile_constant = function
 let rec compile_structured_constant = function
   | Const_base c ->
       compile_constant c
-  (* NOTE(Linnea, 2021-03-10): {true, false} are represented as Const_pointer
-     {1, 0} respectively. *)
-  (* TODO(Linnea, 2021-03-10): Unit has the same representation as false. We
-     probably need to make a distinction when compiling to MExpr, so we will
-     need to track from the typed tree whether the value was unit *)
-  | Const_pointer 0 ->
+  | Const_pointer (0, Ptr_unit) ->
+      tmUnit
+  | Const_pointer (0, Ptr_nil) ->
+      TmSeq (NoInfo, Mseq.empty)
+  | Const_pointer (0, _) ->
       false_
-  | Const_pointer 1 ->
+  | Const_pointer (1, _) ->
       true_
   | Const_pointer _ ->
       failwith "const_pointer"
   | Const_block (tag, str_const_list, (Tag_record | Tag_tuple)) ->
       let consts = List.map compile_structured_constant str_const_list in
       mk_tuple consts
+  | Const_block (tag, str_const_list, Tag_con "::") as c ->
+      let rec collect_list acc const =
+        match const with
+        | Const_pointer (0, Ptr_nil) ->
+            acc
+        | Const_block (_, cs, Tag_con "::") -> (
+          match cs with
+          | [elem; const] ->
+              collect_list (compile_structured_constant elem :: acc) const
+          | _ ->
+              failwith "Expected two arguments to '::'" )
+        | _ ->
+            failwith "Expected cons or empty list"
+      in
+      let elems = collect_list [] c in
+      TmSeq (NoInfo, Mseq.Helpers.of_list elems)
   | Const_block (tag, str_const_list, Tag_con name) ->
       let consts = List.map compile_structured_constant str_const_list in
       add_tagged_type name
@@ -394,8 +409,7 @@ let rec compile_primitive (p : Lambda.primitive) args =
         (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
            way. *)
         mk_var "" s )
-  | Pfield (n, (Pointer | Immediate), Immutable, (Frecord _ | Ftuple))
-    -> (
+  | Pfield (n, (Pointer | Immediate), Immutable, (Frecord _ | Ftuple)) -> (
     match args with
     | [r] ->
         mk_tuple_proj n r
