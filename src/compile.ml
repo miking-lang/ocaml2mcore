@@ -371,7 +371,7 @@ let rec compile_primitive (p : Lambda.primitive) args =
   (* Operations on heap blocks *)
   | Pmakeblock (_tag, _mut, _shape) ->
       mk_tuple args
-  | Pfield (n, Pointer, Immutable, Fmodule_access s) -> (
+  | Pfield (n, Pointer, Immutable, Fmodule s) -> (
     (* Hard coded module accesses *)
     match s with
     | "Stdlib.print_endline" ->
@@ -394,7 +394,7 @@ let rec compile_primitive (p : Lambda.primitive) args =
         (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
            way. *)
         mk_var "" s )
-  | Pfield (n, (Pointer | Immediate), Immutable, (Frecord_access _ | Ftuple))
+  | Pfield (n, (Pointer | Immediate), Immutable, (Frecord _ | Ftuple))
     -> (
     match args with
     | [r] ->
