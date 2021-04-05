@@ -81,7 +81,7 @@ let tyunknown_ = TyUnknown NoInfo
 
 let pcon_ c p = PatCon (NoInfo, from_utf8 c, Symb.Helpers.nosym, p)
 
-let pnamed_ s = PatNamed (NoInfo, NameStr (from_utf8 s, Symb.Helpers.nosym))
+let pnamed_ s = PatNamed (NoInfo, NameStr (s, Symb.Helpers.nosym))
 
 let mk_tuple fields =
   let rec work n binds = function
@@ -225,30 +225,21 @@ let get_error_handler n = IM.find_opt n !error_handlers
 (* Set of global type declarations *)
 let typedecl = ref (SM.empty : tm SM.t)
 
-let get_con tag = "TAG" ^ string_of_int tag
-
-let add_tagged tag binds =
+let add_tagged_type name binds =
   let t =
     TmConDef
       ( NoInfo
-      , from_utf8 tag
+      , from_utf8 name
       , Symb.Helpers.nosym
       , tyarrow_ (tyrecord_ binds) (tyvar_ "Tagged")
       , record_ [] )
   in
-  typedecl := SM.add tag t !typedecl
-
-let get_tagged_type tag =
-  match SM.find (get_con tag) !typedecl with
-  | TmConDef (_, _, _, TyArrow (_, from, _), _) ->
-      from
-  | t ->
-      failwith ("Unexpected binding in typedecl: " ^ pprint_mcore t)
-
-let remove_suffix suffix str =
-  String.sub str 0 (String.length str - String.length suffix)
+  typedecl := SM.add name t !typedecl
 
 let get_typedecl () =
+  let remove_suffix suffix str =
+    String.sub str 0 (String.length str - String.length suffix)
+  in
   let constr =
     List.map
       (fun (_, v) -> pprint_mcore v |> remove_suffix " in ()")
@@ -340,13 +331,14 @@ let rec compile_structured_constant = function
   | Const_block (tag, str_const_list, Tag_record) ->
       let consts = List.map compile_structured_constant str_const_list in
       mk_tuple consts
-  | Const_block (tag, str_const_list, Tag_none) ->
+  | Const_block (tag, str_const_list, Tag_con name) ->
       (* TODO(Linnea, 2021-03-17): First try to construct a cons list for Const_block. *)
       let consts = List.map compile_structured_constant str_const_list in
-      let con_tag = get_con tag in
-      add_tagged con_tag
+      add_tagged_type name
         (List.mapi (fun i _ -> (int2ustring i, tyunknown_)) str_const_list) ;
-      TmConApp (NoInfo, from_utf8 con_tag, Symb.Helpers.nosym, mk_tuple consts)
+      TmConApp (NoInfo, from_utf8 name, Symb.Helpers.nosym, mk_tuple consts)
+  | Const_block (tag, str_const_list, Tag_none) ->
+      failwith "Unknown tag"
   | Const_float_array _ ->
       failwith "float_array"
   | Const_immstring _ ->
@@ -745,35 +737,37 @@ and lambda2mcore (lam : Lambda.program) =
           failwith "switch failaction not supported"
         else if sw.sw_numblocks > 0 then (
           assert (sw.sw_numconsts = 0) ;
-          let rec mk_tag_matches var = function
+          let block_names =
+            match sw.sw_names with
+            | Some {blocks} ->
+                blocks
+            | None ->
+                failwith "Name missing for block"
+          in
+          assert (sw.sw_numblocks == Array.length block_names) ;
+          let rec mk_tag_matches target = function
             | [] ->
                 TmNever NoInfo
-            | (tag, branch) :: xs ->
-                let ty = get_tagged_type tag in
-                let var_str =
-                  match var with
+            | ((_tag, branch), name) :: xs ->
+                let target_str =
+                  match target with
                   | TmVar (_, us, _) ->
                       us
                   | _ ->
-                      failwith ("Expected TmVar, got " ^ pprint_mcore var)
-                in
-                let ann inexpr =
-                  TmLet
-                    ( NoInfo
-                    , var_str
-                    , Symb.Helpers.nosym
-                    , ty
-                    , mk_var "" "t"
-                    , inexpr )
+                      failwith ("Expected TmVar, got " ^ pprint_mcore target)
                 in
                 TmMatch
                   ( NoInfo
-                  , var
-                  , pcon_ (get_con tag) (pnamed_ "t")
-                  , ann (lambda2mcore' m branch)
-                  , mk_tag_matches var xs )
+                  , target
+                  , pcon_ name (pnamed_ target_str)
+                  , lambda2mcore' m branch
+                  , mk_tag_matches target xs )
           in
-          mk_tag_matches (lambda2mcore' m arg) sw.sw_blocks )
+          mk_tag_matches (lambda2mcore' m arg)
+            (List.map2
+               (fun x y -> (x, y))
+               sw.sw_blocks
+               (Array.to_list block_names) ) )
         else
           let rec mk_int_matches var = function
             | [] ->
@@ -861,6 +855,8 @@ let mcore_compile str =
 
 let ocaml2mcore filename =
   Compmisc.init_path () ;
+  Matching.names_from_construct_pattern :=
+    Matching_polyfill.names_from_construct_pattern ;
   let mcore_prog =
     filename |> parse_file |> typecheck |> typed2lambda |> lambda2mcore
     |> pprint_mcore

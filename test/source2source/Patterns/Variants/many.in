@@ -1,0 +1,29 @@
+type tree =
+    Node of int * tree * tree
+  | Leaf of int
+
+type mytype =
+    Foo of int
+  | Bar of char
+
+let rec exists5 tree =
+  match tree with
+  | Leaf v -> v = 5
+  | Node (v, left, right) ->
+    v = 5 || (exists5 left) || (exists5 right)
+
+let foo = function
+  | Foo i -> i
+  | Bar _ -> 42
+
+let _ =
+  let t = Node (1, Leaf 2, Leaf 3) in
+  let b = exists5 t in
+  (if b then
+     print_endline "true"
+   else
+     print_endline "false");
+  let f = Foo 41 in
+  let b = Bar 'a' in
+  print_endline (string_of_int (foo f));
+  print_endline (string_of_int (foo b))
