@@ -430,7 +430,7 @@ let rec compile_primitive (p : Lambda.primitive) args =
         mk_tuple_proj n r
     | _ ->
         failwith "Expected one argument to Pfield immediate" )
-  | Pfield (n, Pointer, Immutable, Fcon) -> (
+  | Pfield (n, Pointer, Immutable, Fcon _) -> (
     match args with
     | [r] ->
         mk_tuple_proj n r
@@ -773,12 +773,46 @@ and lambda2mcore (lam : Lambda.program) =
           , lambda2mcore' m els
           , lambda2mcore' m thn )
     | Lifthenelse (cnd, thn, els, Match_con name) ->
+        let thn_branch = lambda2mcore' m els in
+        let els_branch = lambda2mcore' m thn in
+        let cnd = lambda2mcore' m cnd in
+        let wrap_els_branch els_branch =
+          (* NOTE(Linnea, 2021-04-06): This covers the case of matching on None /
+             Some _ constructors but is not a fully general solution for handling
+             empty constructors. When we see that the else branch contains a field
+             access of a constructor, we wrap it into a match on the constructor
+             name. *)
+          let con_name =
+            match thn with
+            | Llet (_, _, _, Lprim (Pfield (_, _, _, Fcon name), _, _), _) ->
+                Some name
+            | _ ->
+                None
+          in
+          match con_name with
+          | Some name ->
+              let cnd_str =
+                match cnd with
+                | TmVar (_, us, _) ->
+                    us
+                | _ ->
+                    failwith ("Expected variable, got " ^ pprint_mcore cnd)
+              in
+              TmMatch
+                ( NoInfo
+                , cnd
+                , pcon_ name (pnamed_ cnd_str)
+                , els_branch
+                , TmNever NoInfo )
+          | None ->
+              els_branch
+        in
         TmMatch
           ( NoInfo
-          , lambda2mcore' m cnd
+          , cnd
           , pcon_ name pwild_
-          , lambda2mcore' m els
-          , lambda2mcore' m thn )
+          , thn_branch
+          , wrap_els_branch els_branch )
     | Lifthenelse (cnd, thn, els, _) ->
         TmMatch
           ( NoInfo
@@ -808,7 +842,7 @@ and lambda2mcore (lam : Lambda.program) =
                   | TmVar (_, us, _) ->
                       us
                   | _ ->
-                      failwith ("Expected TmVar, got " ^ pprint_mcore target)
+                      failwith ("Expected variable, got " ^ pprint_mcore target)
                 in
                 TmMatch
                   ( NoInfo
