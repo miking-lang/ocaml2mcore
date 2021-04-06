@@ -83,6 +83,8 @@ let pcon_ c p = PatCon (NoInfo, from_utf8 c, Symb.Helpers.nosym, p)
 
 let pnamed_ s = PatNamed (NoInfo, NameStr (s, Symb.Helpers.nosym))
 
+let pwild_ = PatNamed (NoInfo, NameWildcard)
+
 let mk_tuple fields =
   let rec work n binds = function
     | [] ->
@@ -331,6 +333,9 @@ let rec compile_structured_constant = function
       tmUnit
   | Const_pointer (0, Ptr_nil) ->
       TmSeq (NoInfo, Mseq.empty)
+  | Const_pointer (0, Ptr_con name) ->
+      add_tagged_type name [] ;
+      TmConApp (NoInfo, from_utf8 name, Symb.Helpers.nosym, tmUnit)
   | Const_pointer (0, _) ->
       false_
   | Const_pointer (1, _) ->
@@ -425,7 +430,7 @@ let rec compile_primitive (p : Lambda.primitive) args =
         mk_tuple_proj n r
     | _ ->
         failwith "Expected one argument to Pfield immediate" )
-  | Pfield (n, Pointer, Immutable, Fvariant) -> (
+  | Pfield (n, Pointer, Immutable, Fcon) -> (
     match args with
     | [r] ->
         mk_tuple_proj n r
@@ -765,6 +770,13 @@ and lambda2mcore (lam : Lambda.program) =
           ( NoInfo
           , lambda2mcore' m cnd
           , PatSeqTot (NoInfo, Mseq.empty)
+          , lambda2mcore' m els
+          , lambda2mcore' m thn )
+    | Lifthenelse (cnd, thn, els, Match_con name) ->
+        TmMatch
+          ( NoInfo
+          , lambda2mcore' m cnd
+          , pcon_ name pwild_
           , lambda2mcore' m els
           , lambda2mcore' m thn )
     | Lifthenelse (cnd, thn, els, _) ->
