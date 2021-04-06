@@ -191,13 +191,23 @@ let string2int =
 
 let include_string2int = ref false
 
+let head = "let head = lam seq. get seq 0"
+
+let include_head = ref false
+
+let tail = "let tail = lam seq. subsequence seq 1 (subi (length seq) 1)"
+
+let include_tail = ref false
+
 let prelude () =
   String.concat ""
     (List.map
        (fun (r, f) -> if !r then f ^ "\n" else "")
        [ (include_print_ln, print_ln)
        ; (include_int2string, int2string)
-       ; (include_string2int, string2int) ] )
+       ; (include_string2int, string2int)
+       ; (include_head, head)
+       ; (include_tail, tail) ] )
 
 (* Global set of MCore files to include *)
 let includes_ref = ref SS.empty
@@ -415,12 +425,24 @@ let rec compile_primitive (p : Lambda.primitive) args =
         mk_tuple_proj n r
     | _ ->
         failwith "Expected one argument to Pfield immediate" )
-  | Pfield (n, Pointer, Immutable, _) -> (
-    (* NOTE(Linnea, 2021-03-26): Assume for now it's an access in a tagged
-       structure *)
+  | Pfield (n, Pointer, Immutable, Fvariant) -> (
     match args with
     | [r] ->
         mk_tuple_proj n r
+    | _ ->
+        failwith "Expected one argument to Pfield immediate" )
+  | Pfield (n, Pointer, Immutable, Fcons) -> (
+    match args with
+    | [r] -> (
+      match n with
+      | 0 ->
+          include_head := true ;
+          TmApp (NoInfo, mk_var "" "head", r)
+      | 1 ->
+          include_tail := true ;
+          TmApp (NoInfo, mk_var "" "tail", r)
+      | _ ->
+          failwith (sprintf "Out of bounds access in cons: %d" n) )
     | _ ->
         failwith "Expected one argument to Pfield immediate" )
   | Pfield (_, _, _, _) ->
@@ -738,7 +760,14 @@ and lambda2mcore (lam : Lambda.program) =
     | Lprim (p, lamlist, loc) ->
         let args = List.map (lambda2mcore' m) lamlist in
         compile_primitive p args
-    | Lifthenelse (cnd, thn, els) ->
+    | Lifthenelse (cnd, thn, els, Match_nil) ->
+        TmMatch
+          ( NoInfo
+          , lambda2mcore' m cnd
+          , PatSeqTot (NoInfo, Mseq.empty)
+          , lambda2mcore' m els
+          , lambda2mcore' m thn )
+    | Lifthenelse (cnd, thn, els, _) ->
         TmMatch
           ( NoInfo
           , lambda2mcore' m cnd
