@@ -1,0 +1,11 @@
+let rec length lst =
+  match lst with
+  | [] -> 0
+  | _::xs -> 1 + length xs
+
+let _ =
+  print_endline (length [] |> string_of_int);
+  print_endline (length [32] |> string_of_int);
+  print_endline (length [390; 0] |> string_of_int);
+  print_endline (length ['a'; 'A'] |> string_of_int);
+  print_endline (length [1; 2; 3; 4; 5] |> string_of_int)
