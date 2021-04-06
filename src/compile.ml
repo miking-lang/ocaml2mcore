@@ -336,9 +336,9 @@ let rec compile_structured_constant = function
   | Const_pointer (0, Ptr_con name) ->
       add_tagged_type name [] ;
       TmConApp (NoInfo, from_utf8 name, Symb.Helpers.nosym, tmUnit)
-  | Const_pointer (0, _) ->
+  | Const_pointer (0, Ptr_bool) ->
       false_
-  | Const_pointer (1, _) ->
+  | Const_pointer (1, Ptr_bool) ->
       true_
   | Const_pointer _ ->
       failwith "const_pointer"
