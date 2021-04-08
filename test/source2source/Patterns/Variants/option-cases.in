@@ -1,0 +1,16 @@
+type 'a option =
+  | None
+  | Some of 'a
+
+let get_or d = function
+  | None -> d
+  | Some v when v = 2 -> 3
+  | Some v when v > 100 -> 90
+  | Some v -> v
+
+let _ =
+  let n = None in
+  let s = Some 2 in
+  print_endline (string_of_int (get_or 42 s));
+  print_endline (string_of_int (get_or 42 n));
+  print_endline (string_of_int (get_or 42 (Some 101)))

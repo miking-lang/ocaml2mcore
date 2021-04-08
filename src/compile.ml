@@ -53,7 +53,7 @@ let mk_string str =
 let mk_let ident body inexpr =
   TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
 
-let mk_lam ident body =
+let lam_ ident body =
   TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
 
 let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
@@ -66,6 +66,10 @@ let mk_var_ident m ident = mk_var m (Ident.name ident)
 
 let record_from_list binds =
   List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
+
+let const_ c = TmConst (NoInfo, c)
+
+let app_ a b = TmApp (NoInfo, a, b)
 
 let record_ binds = TmRecord (NoInfo, record_from_list binds)
 
@@ -147,69 +151,6 @@ let land_ b1 b2 = mk_ite b1 b2 false_
 let lor_ b1 b2 = mk_ite b1 true_ b2
 
 let not_ b = mk_ite b false_ true_
-
-(* Prelude *)
-(* TODO(linnea, 2021-03-19): Some (all?) of these functions should be included
-   from stdlib once they compile. *)
-let print_ln = "let printLn = lam s. print s; print \"\\n\""
-
-let include_print_ln = ref false
-
-let int2string =
-  "let int2string = lam n.\n\
-  \  recursive\n\
-  \  let int2string_rechelper = lam n.\n\
-  \    if lti n 10\n\
-  \    then [int2char (addi n (char2int '0'))]\n\
-  \    else\n\
-  \      let d = [int2char (addi (modi n 10) (char2int '0'))] in\n\
-  \      concat (int2string_rechelper (divi n 10)) d\n\
-  \  in\n\
-  \  if lti n 0\n\
-  \  then cons '-' (int2string_rechelper (negi n))\n\
-  \  else int2string_rechelper n\n"
-
-let include_int2string = ref false
-
-let string2int =
-  "let head = lam seq. get seq 0\n\n\
-   let tail = lam seq. subsequence seq 1 (subi (length seq) 1)\n\n\
-   let string2int = lam s.\n\
-  \  recursive\n\
-  \  let string2int_rechelper = lam s.\n\
-  \    let len = length s in\n\
-  \    let last = subi len 1 in\n\
-  \    if eqi len 0\n\
-  \    then 0\n\
-  \    else\n\
-  \      let lsd = subi (char2int (get s last)) (char2int '0') in\n\
-  \      let rest = muli 10 (string2int_rechelper (subsequence s 0 last)) in\n\
-  \      addi rest lsd\n\
-  \  in\n\
-  \  match s with [] then 0 else\n\
-  \  if eqc '-' (head s)\n\
-  \  then negi (string2int_rechelper (tail s))\n\
-  \  else string2int_rechelper s\n"
-
-let include_string2int = ref false
-
-let head = "let head = lam seq. get seq 0"
-
-let include_head = ref false
-
-let tail = "let tail = lam seq. subsequence seq 1 (subi (length seq) 1)"
-
-let include_tail = ref false
-
-let prelude () =
-  String.concat ""
-    (List.map
-       (fun (r, f) -> if !r then f ^ "\n" else "")
-       [ (include_print_ln, print_ln)
-       ; (include_int2string, int2string)
-       ; (include_string2int, string2int)
-       ; (include_head, head)
-       ; (include_tail, tail) ] )
 
 (* Global set of MCore files to include *)
 let includes_ref = ref SS.empty
@@ -303,6 +244,53 @@ let typed2lambda typed =
     pprint_lambda lamprog.code )
   else () ;
   lamprog
+
+(* Access in modules, either external or in-file defined *)
+let rec compile_module_access = function
+  (* Standard library I/O and strings *)
+  | "Stdlib.print_endline" ->
+      add_include "common.mc" ; mk_var "" "printLn"
+  | "Stdlib.print_int" ->
+      lam_ (from_utf8 "x")
+        (app_ (const_ Cprint)
+           (app_
+              (compile_module_access "Stdlib.string_of_int")
+              (mk_var "" "x") ) )
+  | "Stdlib.read_line" ->
+      const_ CreadLine
+  | "Stdlib.string_of_int" ->
+      add_include "string.mc" ; mk_var "" "int2string"
+  | "Stdlib.^" ->
+      TmConst (NoInfo, Cconcat None)
+  | "Stdlib.Char.escaped" ->
+      add_include "char.mc" ;
+      Boot.Parserutils.parse_mexpr_string
+        (from_utf8 "lam c. escapeChar (int2char c)")
+  | "Stdlib.String.concat" ->
+      add_include "string.mc" ; mk_var "" "strJoin"
+  (* Standard library lists *)
+  | "Stdlib.List.init" ->
+      const_ (Ccreate None)
+  | "Stdlib.List.map" ->
+      add_include "seq.mc" ; mk_var "" "map"
+  | "Stdlib.List.partition" ->
+      add_include "seq.mc" ; mk_var "" "partition"
+  | "Stdlib.@" ->
+      const_ (Cconcat None)
+  | "Stdlib.List.cons" ->
+      const_ (Ccons None)
+  (* Standard library random numbers *)
+  | "Stdlib.Random.init" ->
+      const_ CrandSetSeed
+  | "Stdlib.Random.int" ->
+      app_ (const_ (CrandIntU None)) (int_ 0)
+  (* In-file defined modules *)
+  | s when module_is_defined (get_module s) ->
+      mk_var "" s
+  | s ->
+      (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
+         way. *)
+      mk_var "" s
 
 (* Compile a Lambda constant *)
 let compile_constant = function
@@ -399,31 +387,13 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pdirapply ->
       failwith "dirapply"
   (* Operations on heap blocks *)
-  | Pmakeblock (_tag, _mut, _shape) ->
+  | Pmakeblock (_tag, _mut, _shape, Tag_con "::") ->
+      mk_constapp2 (Ccons None) args
+  | Pmakeblock (_tag, _mut, _shape, _) ->
+      (* TODO(Linnea, 2021-04-08): handle other tags *)
       mk_tuple args
-  | Pfield (n, Pointer, Immutable, Fmodule s) -> (
-    (* Hard coded module accesses *)
-    match s with
-    | "Stdlib.print_endline" ->
-        include_print_ln := true ;
-        mk_var "" "printLn"
-    | "Stdlib.string_of_int" ->
-        include_int2string := true ;
-        mk_var "" "int2string"
-    | "Stdlib.^" ->
-        TmConst (NoInfo, Cconcat None)
-    | "Stdlib.Char.escaped" ->
-        add_include "char.mc" ;
-        Boot.Parserutils.parse_mexpr_string
-          (from_utf8 "lam c. escapeChar (int2char c)")
-    | "Stdlib.read_line" ->
-        mk_var "" "readLine"
-    | _ when module_is_defined (get_module s) ->
-        mk_var "" s
-    | _ ->
-        (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
-           way. *)
-        mk_var "" s )
+  | Pfield (n, Pointer, Immutable, Fmodule s) ->
+      compile_module_access s
   | Pfield (n, (Pointer | Immediate), Immutable, (Frecord _ | Ftuple)) -> (
     match args with
     | [r] ->
@@ -441,10 +411,10 @@ let rec compile_primitive (p : Lambda.primitive) args =
     | [r] -> (
       match n with
       | 0 ->
-          include_head := true ;
+          add_include "seq.mc" ;
           TmApp (NoInfo, mk_var "" "head", r)
       | 1 ->
-          include_tail := true ;
+          add_include "seq.mc" ;
           TmApp (NoInfo, mk_var "" "tail", r)
       | _ ->
           failwith (sprintf "Out of bounds access in cons: %d" n) )
@@ -466,10 +436,14 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pccall {prim_name= "caml_int_of_string"} -> (
     match args with
     | [a] ->
-        include_string2int := true ;
+        add_include "string.mc" ;
         TmApp (NoInfo, mk_var "" "string2int", a)
     | _ ->
         failwith "Expected one argument to caml_int_of_string" )
+  | Pccall {prim_name= "caml_lessthan"} ->
+      (* NOTE(Linnea, 2021-04-08): Assume integer <, and hope that it fails
+         spectacularly if not true *)
+      mk_constapp2 (Clti None) args
   | Pccall desc ->
       failwith ("External call " ^ desc.prim_name ^ " not implemented")
   (* Exceptions *)
@@ -732,7 +706,7 @@ and lambda2mcore (lam : Lambda.program) =
           | [] ->
               lambda2mcore' m body
           | (ident, _vkind) :: ps ->
-              mk_lam (mk_ident m ident) (mk_lambda ps body)
+              lam_ (mk_ident m ident) (mk_lambda ps body)
         in
         mk_lambda params body
     | Llet
@@ -873,7 +847,7 @@ and lambda2mcore (lam : Lambda.program) =
        operator with an empty makeblock node as rhs. To get nicer output we
        simply ignore this empty block (otherwise the program would end with
        "...; ()") *)
-    | Lsequence (l1, Lprim (Pmakeblock (_, _, _), [], _)) ->
+    | Lsequence (l1, Lprim (Pmakeblock _, [], _)) ->
         lambda2mcore' m l1
     | Lsequence (l1, l2) ->
         mk_seq (lambda2mcore' m l1) (lambda2mcore' m l2)
@@ -951,7 +925,6 @@ let ocaml2mcore filename =
   in
   let includes = String.concat "\n" (SS.elements !includes_ref) in
   let full_prog =
-    String.concat "\n"
-      [includes; get_typedecl (); prelude (); "mexpr"; mcore_prog]
+    String.concat "\n" [includes; get_typedecl (); "mexpr"; mcore_prog]
   in
   to_output full_prog ; mcore_compile full_prog
