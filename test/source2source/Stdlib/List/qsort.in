@@ -22,7 +22,6 @@ let rec quicksort seq =
 
 let _ =
   10
-  |> int_of_string
   |> rand_list
   |> quicksort
   |> List.map string_of_int

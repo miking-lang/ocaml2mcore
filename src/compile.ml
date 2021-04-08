@@ -152,69 +152,6 @@ let lor_ b1 b2 = mk_ite b1 true_ b2
 
 let not_ b = mk_ite b false_ true_
 
-(* Prelude *)
-(* TODO(linnea, 2021-03-19): Some (all?) of these functions should be included
-   from stdlib once they compile. *)
-let print_ln = "let printLn = lam s. print s; print \"\\n\""
-
-let include_print_ln = ref false
-
-let int2string =
-  "let int2string = lam n.\n\
-  \  recursive\n\
-  \  let int2string_rechelper = lam n.\n\
-  \    if lti n 10\n\
-  \    then [int2char (addi n (char2int '0'))]\n\
-  \    else\n\
-  \      let d = [int2char (addi (modi n 10) (char2int '0'))] in\n\
-  \      concat (int2string_rechelper (divi n 10)) d\n\
-  \  in\n\
-  \  if lti n 0\n\
-  \  then cons '-' (int2string_rechelper (negi n))\n\
-  \  else int2string_rechelper n\n"
-
-let include_int2string = ref false
-
-let string2int =
-  "let head = lam seq. get seq 0\n\n\
-   let tail = lam seq. subsequence seq 1 (subi (length seq) 1)\n\n\
-   let string2int = lam s.\n\
-  \  recursive\n\
-  \  let string2int_rechelper = lam s.\n\
-  \    let len = length s in\n\
-  \    let last = subi len 1 in\n\
-  \    if eqi len 0\n\
-  \    then 0\n\
-  \    else\n\
-  \      let lsd = subi (char2int (get s last)) (char2int '0') in\n\
-  \      let rest = muli 10 (string2int_rechelper (subsequence s 0 last)) in\n\
-  \      addi rest lsd\n\
-  \  in\n\
-  \  match s with [] then 0 else\n\
-  \  if eqc '-' (head s)\n\
-  \  then negi (string2int_rechelper (tail s))\n\
-  \  else string2int_rechelper s\n"
-
-let include_string2int = ref false
-
-let head = "let head = lam seq. get seq 0"
-
-let include_head = ref false
-
-let tail = "let tail = lam seq. subsequence seq 1 (subi (length seq) 1)"
-
-let include_tail = ref false
-
-let prelude () =
-  String.concat ""
-    (List.map
-       (fun (r, f) -> if !r then f ^ "\n" else "")
-       [ (include_print_ln, print_ln)
-       ; (include_int2string, int2string)
-       ; (include_string2int, string2int)
-       ; (include_head, head)
-       ; (include_tail, tail) ] )
-
 (* Global set of MCore files to include *)
 let includes_ref = ref SS.empty
 
@@ -312,8 +249,7 @@ let typed2lambda typed =
 let rec compile_module_access = function
   (* Standard library I/O and strings *)
   | "Stdlib.print_endline" ->
-      include_print_ln := true ;
-      mk_var "" "printLn"
+      add_include "common.mc" ; mk_var "" "printLn"
   | "Stdlib.print_int" ->
       lam_ (from_utf8 "x")
         (app_ (const_ Cprint)
@@ -323,8 +259,7 @@ let rec compile_module_access = function
   | "Stdlib.read_line" ->
       const_ CreadLine
   | "Stdlib.string_of_int" ->
-      include_int2string := true ;
-      mk_var "" "int2string"
+      add_include "string.mc" ; mk_var "" "int2string"
   | "Stdlib.^" ->
       TmConst (NoInfo, Cconcat None)
   | "Stdlib.Char.escaped" ->
@@ -476,10 +411,10 @@ let rec compile_primitive (p : Lambda.primitive) args =
     | [r] -> (
       match n with
       | 0 ->
-          include_head := true ;
+          add_include "seq.mc" ;
           TmApp (NoInfo, mk_var "" "head", r)
       | 1 ->
-          include_tail := true ;
+          add_include "seq.mc" ;
           TmApp (NoInfo, mk_var "" "tail", r)
       | _ ->
           failwith (sprintf "Out of bounds access in cons: %d" n) )
@@ -501,7 +436,7 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pccall {prim_name= "caml_int_of_string"} -> (
     match args with
     | [a] ->
-        include_string2int := true ;
+        add_include "string.mc" ;
         TmApp (NoInfo, mk_var "" "string2int", a)
     | _ ->
         failwith "Expected one argument to caml_int_of_string" )
@@ -990,7 +925,6 @@ let ocaml2mcore filename =
   in
   let includes = String.concat "\n" (SS.elements !includes_ref) in
   let full_prog =
-    String.concat "\n"
-      [includes; get_typedecl (); prelude (); "mexpr"; mcore_prog]
+    String.concat "\n" [includes; get_typedecl (); "mexpr"; mcore_prog]
   in
   to_output full_prog ; mcore_compile full_prog
