@@ -1,0 +1,7 @@
+let _ =
+  Random.init 5;
+  print_endline (string_of_int (Random.int 5));
+  print_endline (string_of_int (Random.int 5));
+  print_endline (string_of_int (Random.int 10));
+  print_endline (string_of_int (Random.int 5));
+  print_endline (string_of_int (Random.int 5))

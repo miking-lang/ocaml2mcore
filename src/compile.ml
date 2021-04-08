@@ -53,7 +53,7 @@ let mk_string str =
 let mk_let ident body inexpr =
   TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
 
-let mk_lam ident body =
+let lam_ ident body =
   TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
 
 let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
@@ -66,6 +66,10 @@ let mk_var_ident m ident = mk_var m (Ident.name ident)
 
 let record_from_list binds =
   List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
+
+let const_ c = TmConst (NoInfo, c)
+
+let app_ a b = TmApp (NoInfo, a, b)
 
 let record_ binds = TmRecord (NoInfo, record_from_list binds)
 
@@ -304,6 +308,55 @@ let typed2lambda typed =
   else () ;
   lamprog
 
+(* Access in modules, either external or in-file defined *)
+let rec compile_module_access = function
+  (* Standard library I/O and strings *)
+  | "Stdlib.print_endline" ->
+      include_print_ln := true ;
+      mk_var "" "printLn"
+  | "Stdlib.print_int" ->
+      lam_ (from_utf8 "x")
+        (app_ (const_ Cprint)
+           (app_
+              (compile_module_access "Stdlib.string_of_int")
+              (mk_var "" "x") ) )
+  | "Stdlib.read_line" ->
+      const_ CreadLine
+  | "Stdlib.string_of_int" ->
+      include_int2string := true ;
+      mk_var "" "int2string"
+  | "Stdlib.^" ->
+      TmConst (NoInfo, Cconcat None)
+  | "Stdlib.Char.escaped" ->
+      add_include "char.mc" ;
+      Boot.Parserutils.parse_mexpr_string
+        (from_utf8 "lam c. escapeChar (int2char c)")
+  | "Stdlib.String.concat" ->
+      add_include "string.mc" ; mk_var "" "strJoin"
+  (* Standard library lists *)
+  | "Stdlib.List.init" ->
+      const_ (Ccreate None)
+  | "Stdlib.List.map" ->
+      add_include "seq.mc" ; mk_var "" "map"
+  | "Stdlib.List.partition" ->
+      add_include "seq.mc" ; mk_var "" "partition"
+  | "Stdlib.@" ->
+      const_ (Cconcat None)
+  | "Stdlib.List.cons" ->
+      const_ (Ccons None)
+  (* Standard library random numbers *)
+  | "Stdlib.Random.init" ->
+      const_ CrandSetSeed
+  | "Stdlib.Random.int" ->
+      app_ (const_ (CrandIntU None)) (int_ 0)
+  (* In-file defined modules *)
+  | s when module_is_defined (get_module s) ->
+      mk_var "" s
+  | s ->
+      (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
+         way. *)
+      mk_var "" s
+
 (* Compile a Lambda constant *)
 let compile_constant = function
   | Const_int i ->
@@ -399,31 +452,13 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pdirapply ->
       failwith "dirapply"
   (* Operations on heap blocks *)
-  | Pmakeblock (_tag, _mut, _shape) ->
+  | Pmakeblock (_tag, _mut, _shape, Tag_con "::") ->
+      mk_constapp2 (Ccons None) args
+  | Pmakeblock (_tag, _mut, _shape, _) ->
+      (* TODO(Linnea, 2021-04-08): handle other tags *)
       mk_tuple args
-  | Pfield (n, Pointer, Immutable, Fmodule s) -> (
-    (* Hard coded module accesses *)
-    match s with
-    | "Stdlib.print_endline" ->
-        include_print_ln := true ;
-        mk_var "" "printLn"
-    | "Stdlib.string_of_int" ->
-        include_int2string := true ;
-        mk_var "" "int2string"
-    | "Stdlib.^" ->
-        TmConst (NoInfo, Cconcat None)
-    | "Stdlib.Char.escaped" ->
-        add_include "char.mc" ;
-        Boot.Parserutils.parse_mexpr_string
-          (from_utf8 "lam c. escapeChar (int2char c)")
-    | "Stdlib.read_line" ->
-        mk_var "" "readLine"
-    | _ when module_is_defined (get_module s) ->
-        mk_var "" s
-    | _ ->
-        (* TODO(Linnea, 2021-03-16): External dependency, should be marked in some
-           way. *)
-        mk_var "" s )
+  | Pfield (n, Pointer, Immutable, Fmodule s) ->
+      compile_module_access s
   | Pfield (n, (Pointer | Immediate), Immutable, (Frecord _ | Ftuple)) -> (
     match args with
     | [r] ->
@@ -470,6 +505,10 @@ let rec compile_primitive (p : Lambda.primitive) args =
         TmApp (NoInfo, mk_var "" "string2int", a)
     | _ ->
         failwith "Expected one argument to caml_int_of_string" )
+  | Pccall {prim_name= "caml_lessthan"} ->
+      (* NOTE(Linnea, 2021-04-08): Assume integer <, and hope that it fails
+         spectacularly if not true *)
+      mk_constapp2 (Clti None) args
   | Pccall desc ->
       failwith ("External call " ^ desc.prim_name ^ " not implemented")
   (* Exceptions *)
@@ -732,7 +771,7 @@ and lambda2mcore (lam : Lambda.program) =
           | [] ->
               lambda2mcore' m body
           | (ident, _vkind) :: ps ->
-              mk_lam (mk_ident m ident) (mk_lambda ps body)
+              lam_ (mk_ident m ident) (mk_lambda ps body)
         in
         mk_lambda params body
     | Llet
@@ -873,7 +912,7 @@ and lambda2mcore (lam : Lambda.program) =
        operator with an empty makeblock node as rhs. To get nicer output we
        simply ignore this empty block (otherwise the program would end with
        "...; ()") *)
-    | Lsequence (l1, Lprim (Pmakeblock (_, _, _), [], _)) ->
+    | Lsequence (l1, Lprim (Pmakeblock _, [], _)) ->
         lambda2mcore' m l1
     | Lsequence (l1, l2) ->
         mk_seq (lambda2mcore' m l1) (lambda2mcore' m l2)

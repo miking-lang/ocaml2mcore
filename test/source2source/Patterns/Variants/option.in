@@ -1,0 +1,14 @@
+type 'a option =
+  | None
+  | Some of 'a
+
+let get_or d = function
+  | None -> d
+  | Some v -> v
+
+let _ =
+  let n = None in
+  let s = Some 1 in
+  print_endline (string_of_int (get_or 42 s));
+  print_endline (string_of_int (get_or 42 n));
+  print_endline (Char.escaped (get_or 'a' (Some 'B')))
