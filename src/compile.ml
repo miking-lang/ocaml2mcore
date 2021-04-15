@@ -32,15 +32,11 @@ let filename = prefix ^ ".ml"
 
 let modulename = "Test"
 
-(* MCore no-op instruction *)
-let mcore_noop = tmUnit
-
-(* Pretty print an MExpr AST *)
-let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
-
-(* AST helper functions *)
 let int2ustring = Boot.Ustring.Op.ustring_of_int
 
+let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
+
+(* Name mangling *)
 let ident2varstr m ident =
   match m with "" -> Ident.unique_name ident | _ -> Ident.name ident
 
@@ -54,114 +50,121 @@ let mangle m s = m ^ s
 let ident2mangled m ident =
   ident |> ident2varstr m |> mangle m |> Boot.Ustring.from_utf8
 
-let mk_string str =
-  TmSeq
-    ( NoInfo
-    , Mseq.Helpers.map
-        (fun x -> TmConst (NoInfo, CChar x))
-        (from_latin1 str |> Mseq.Helpers.of_ustring) )
+module AstHelpers = struct
+  let mcore_noop = tmUnit
 
-let mk_let ident body inexpr =
-  TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
+  let mk_string str =
+    TmSeq
+      ( NoInfo
+      , Mseq.Helpers.map
+          (fun x -> TmConst (NoInfo, CChar x))
+          (from_latin1 str |> Mseq.Helpers.of_ustring) )
 
-let lam_ ident body =
-  TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
+  let mk_let ident body inexpr =
+    TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
 
-let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
+  let lam_ ident body =
+    TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
 
-let mk_ite cnd thn els = TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
+  let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
 
-let mk_var m s = TmVar (NoInfo, from_utf8 (mangle m s), Symb.Helpers.nosym)
+  let mk_ite cnd thn els =
+    TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
 
-let mk_var_ident m ident = mk_var m (ident2varstr m ident)
+  let mk_var m s = TmVar (NoInfo, from_utf8 (mangle m s), Symb.Helpers.nosym)
 
-let record_from_list binds =
-  List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
+  let mk_var_ident m ident = mk_var m (ident2varstr m ident)
 
-let const_ c = TmConst (NoInfo, c)
+  let record_from_list binds =
+    List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
 
-let app_ a b = TmApp (NoInfo, a, b)
+  let const_ c = TmConst (NoInfo, c)
 
-let record_ binds = TmRecord (NoInfo, record_from_list binds)
+  let app_ a b = TmApp (NoInfo, a, b)
 
-let tyrecord_ binds = TyRecord (NoInfo, record_from_list binds)
+  let record_ binds = TmRecord (NoInfo, record_from_list binds)
 
-let precord_ binds = PatRecord (NoInfo, record_from_list binds)
+  let tyrecord_ binds = TyRecord (NoInfo, record_from_list binds)
 
-let tyarrow_ l h = TyArrow (NoInfo, l, h)
+  let precord_ binds = PatRecord (NoInfo, record_from_list binds)
 
-let tyvar_ s = TyVar (NoInfo, from_utf8 s, Symb.Helpers.nosym)
+  let tyarrow_ l h = TyArrow (NoInfo, l, h)
 
-let tyunknown_ = TyUnknown NoInfo
+  let tyvar_ s = TyVar (NoInfo, from_utf8 s, Symb.Helpers.nosym)
 
-let pcon_ c p = PatCon (NoInfo, from_utf8 c, Symb.Helpers.nosym, p)
+  let tyunknown_ = TyUnknown NoInfo
 
-let pnamed_ s = PatNamed (NoInfo, NameStr (s, Symb.Helpers.nosym))
+  let pcon_ c p = PatCon (NoInfo, from_utf8 c, Symb.Helpers.nosym, p)
 
-let pwild_ = PatNamed (NoInfo, NameWildcard)
+  let pnamed_ s = PatNamed (NoInfo, NameStr (s, Symb.Helpers.nosym))
 
-let mk_tuple fields =
-  let rec work n binds = function
-    | [] ->
-        record_ binds
-    | x :: xs ->
-        work (n + 1) ((int2ustring n, x) :: binds) xs
-  in
-  work 0 [] fields
+  let pwild_ = PatNamed (NoInfo, NameWildcard)
 
-let mk_tuple_proj n r =
-  TmMatch
-    ( NoInfo
-    , r
-    , PatRecord
-        ( NoInfo
-        , record_from_list
-            [ ( int2ustring n
-              , PatNamed (NoInfo, NameStr (from_utf8 "x", Symb.Helpers.nosym))
-              ) ] )
-    , mk_var "" "x"
-    , TmNever NoInfo )
+  let mk_tuple fields =
+    let rec work n binds = function
+      | [] ->
+          record_ binds
+      | x :: xs ->
+          work (n + 1) ((int2ustring n, x) :: binds) xs
+    in
+    work 0 [] fields
 
-let fail_constapp f args =
-  failwith
-    ( "Incorrect application. Function: "
-    ^ to_utf8 (ustring_of_const f)
-    ^ ", arguments: "
-    ^ String.concat " " (List.map (fun x -> ustring_of_tm x |> to_utf8) args)
-    )
+  let mk_tuple_proj n r =
+    TmMatch
+      ( NoInfo
+      , r
+      , PatRecord
+          ( NoInfo
+          , record_from_list
+              [ ( int2ustring n
+                , PatNamed (NoInfo, NameStr (from_utf8 "x", Symb.Helpers.nosym))
+                ) ] )
+      , mk_var "" "x"
+      , TmNever NoInfo )
 
-let mk_constapp1 op args =
-  match args with
-  | [a] ->
-      TmApp (NoInfo, TmConst (NoInfo, op), a)
-  | _ ->
-      fail_constapp op args
+  let fail_constapp f args =
+    failwith
+      ( "Incorrect application. Function: "
+      ^ to_utf8 (ustring_of_const f)
+      ^ ", arguments: "
+      ^ String.concat " " (List.map (fun x -> ustring_of_tm x |> to_utf8) args)
+      )
 
-let mk_constapp2 op args =
-  match args with
-  | [a1; a2] ->
-      TmApp (NoInfo, TmApp (NoInfo, TmConst (NoInfo, op), a1), a2)
-  | _ ->
-      fail_constapp op args
+  let mk_constapp1 op args =
+    match args with
+    | [a] ->
+        TmApp (NoInfo, TmConst (NoInfo, op), a)
+    | _ ->
+        fail_constapp op args
 
-let int_ = function
-  | i when i < 0 ->
-      (* NOTE(Linnea, 2021-03-17): Use negi to ensure parsability *)
-      TmApp (NoInfo, TmConst (NoInfo, Cnegi), TmConst (NoInfo, CInt (-i)))
-  | i ->
-      TmConst (NoInfo, CInt i)
+  let mk_constapp2 op args =
+    match args with
+    | [a1; a2] ->
+        TmApp (NoInfo, TmApp (NoInfo, TmConst (NoInfo, op), a1), a2)
+    | _ ->
+        fail_constapp op args
 
-let pint_ n = PatInt (NoInfo, n)
+  let int_ = function
+    | i when i < 0 ->
+        (* NOTE(Linnea, 2021-03-17): Use negi to ensure parsability *)
+        TmApp (NoInfo, TmConst (NoInfo, Cnegi), TmConst (NoInfo, CInt (-i)))
+    | i ->
+        TmConst (NoInfo, CInt i)
 
-let true_ = TmConst (NoInfo, CBool true)
+  let pint_ n = PatInt (NoInfo, n)
 
-let false_ = TmConst (NoInfo, CBool false)
+  let true_ = TmConst (NoInfo, CBool true)
 
-let land_ b1 b2 = mk_ite b1 b2 false_
+  let false_ = TmConst (NoInfo, CBool false)
 
-let lor_ b1 b2 = mk_ite b1 true_ b2
+  let land_ b1 b2 = mk_ite b1 b2 false_
 
-let not_ b = mk_ite b false_ true_
+  let lor_ b1 b2 = mk_ite b1 true_ b2
+
+  let not_ b = mk_ite b false_ true_
+end
+
+open AstHelpers
 
 (* Global set of MCore files to include *)
 let includes_ref = ref SS.empty
