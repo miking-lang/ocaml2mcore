@@ -41,7 +41,18 @@ let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
 (* AST helper functions *)
 let int2ustring = Boot.Ustring.Op.ustring_of_int
 
-let mk_ident m ident = from_utf8 (m ^ Ident.name ident)
+let ident2varstr m ident =
+  match m with "" -> Ident.unique_name ident | _ -> Ident.name ident
+
+(* Module strings are already unique *)
+let ident2modstr ident = Ident.name ident
+
+let append_module_ident m ident = m ^ ident2modstr ident ^ "."
+
+let mangle m s = m ^ s
+
+let ident2mangled m ident =
+  ident |> ident2varstr m |> mangle m |> Boot.Ustring.from_utf8
 
 let mk_string str =
   TmSeq
@@ -60,9 +71,9 @@ let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
 
 let mk_ite cnd thn els = TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
 
-let mk_var m s = TmVar (NoInfo, from_utf8 (m ^ s), Symb.Helpers.nosym)
+let mk_var m s = TmVar (NoInfo, from_utf8 (mangle m s), Symb.Helpers.nosym)
 
-let mk_var_ident m ident = mk_var m (Ident.name ident)
+let mk_var_ident m ident = mk_var m (ident2varstr m ident)
 
 let record_from_list binds =
   List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
@@ -279,6 +290,10 @@ let rec compile_module_access = function
       const_ (Cconcat None)
   | "Stdlib.List.cons" ->
       const_ (Ccons None)
+  | "Stdlib.List.length" ->
+      const_ Clength
+  | "Stdlib.List.iter" ->
+      add_include "seq.mc" ; mk_var "" "iter"
   (* Standard library random numbers *)
   | "Stdlib.Random.init" ->
       const_ CrandSetSeed
@@ -706,7 +721,7 @@ and lambda2mcore (lam : Lambda.program) =
           | [] ->
               lambda2mcore' m body
           | (ident, _vkind) :: ps ->
-              lam_ (mk_ident m ident) (mk_lambda ps body)
+              lam_ (ident2mangled m ident) (mk_lambda ps body)
         in
         mk_lambda params body
     | Llet
@@ -716,13 +731,13 @@ and lambda2mcore (lam : Lambda.program) =
         , ident
         , Levent (lam, {lev_kind= Lev_module_definition mident})
         , inexpr ) ->
-        let b = lambda2mcore' (m ^ Ident.name ident ^ ".") lam in
+        let b = lambda2mcore' (append_module_ident m ident) lam in
         let i = lambda2mcore' m inexpr in
         (* NOTE(linnea, 2021-03-17): Inserts a dummy "<modulename> = ()" because
            the module name is referred to in makeblock *)
-        mk_let (mk_ident m ident) mcore_noop (mk_seq b i)
+        mk_let (ident2mangled m ident) mcore_noop (mk_seq b i)
     | Llet (_kind, _value_kind, ident, body, inexpr) ->
-        mk_let (mk_ident m ident) (lambda2mcore' m body)
+        mk_let (ident2mangled m ident) (lambda2mcore' m body)
           (lambda2mcore' m inexpr)
     | Lletrec (binds, inexpr) ->
         TmRecLets
@@ -730,7 +745,7 @@ and lambda2mcore (lam : Lambda.program) =
           , List.map
               (fun (ident, body) ->
                 ( NoInfo
-                , mk_ident m ident
+                , ident2mangled m ident
                 , Symb.Helpers.nosym
                 , TyUnknown NoInfo
                 , lambda2mcore' m body ) )
@@ -746,6 +761,8 @@ and lambda2mcore (lam : Lambda.program) =
           , PatSeqTot (NoInfo, Mseq.empty)
           , lambda2mcore' m els
           , lambda2mcore' m thn )
+    (* | Lifthenelse (cnd, thn, els, Match_con "::") ->
+     *   failwith "match ::" *)
     | Lifthenelse (cnd, thn, els, Match_con name) ->
         let thn_branch = lambda2mcore' m els in
         let els_branch = lambda2mcore' m thn in
