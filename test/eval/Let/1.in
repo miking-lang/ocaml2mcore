@@ -1,5 +1,4 @@
-mexpr
-let a = negi 3 in
+let a = -3 in
 let b = a in
 let c = b in
-c
+print_int c

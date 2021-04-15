@@ -1,7 +1,0 @@
-mexpr
-recursive
-  let foo = lam x.
-    bar x
-  let bar = lam x.
-    42
-in foo

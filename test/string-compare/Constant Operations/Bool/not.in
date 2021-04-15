@@ -1,3 +1,0 @@
-let bool_not b =
-  not b
-in 42

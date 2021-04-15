@@ -1,5 +1,0 @@
-mexpr
-let x = 1 in
-let foo = lam x. lam y.
-  addi x y
-in foo x

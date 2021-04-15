@@ -1,2 +1,0 @@
-mexpr
-let foo = lam a. lam b. lam c. lam d. lam e. lam f. lam g. lam h. lam i. lam j. addi (addi (addi (addi (addi (addi (addi (addi (addi a b) c) d) e) f) g) h) i) j in foo

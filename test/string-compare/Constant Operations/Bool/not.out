@@ -1,4 +1,0 @@
-mexpr
-let bool_not = lam b.
-  if b then false else true
-in 42

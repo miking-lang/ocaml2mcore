@@ -1,4 +1,0 @@
-mexpr
-let bool_or = lam b1. lam b2.
-  if b1 then true else b2
-in 42

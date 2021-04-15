@@ -1,2 +1,0 @@
-let s = "hello" in
-String.get s 3

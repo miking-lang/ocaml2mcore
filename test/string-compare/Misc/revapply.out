@@ -1,4 +1,0 @@
-mexpr
-let add = lam x. lam y.
-  addi x y
-in add 1 2
