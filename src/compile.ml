@@ -754,15 +754,13 @@ and lambda2mcore (lam : Lambda.program) =
     | Lprim (p, lamlist, loc) ->
         let args = List.map (lambda2mcore' m) lamlist in
         compile_primitive p args
-    | Lifthenelse (cnd, thn, els, Match_nil) ->
+    | Lifthenelse (cnd, thn, els, (Match_nil | Match_con "::")) ->
         TmMatch
           ( NoInfo
           , lambda2mcore' m cnd
           , PatSeqTot (NoInfo, Mseq.empty)
           , lambda2mcore' m els
           , lambda2mcore' m thn )
-    (* | Lifthenelse (cnd, thn, els, Match_con "::") ->
-     *   failwith "match ::" *)
     | Lifthenelse (cnd, thn, els, Match_con name) ->
         let thn_branch = lambda2mcore' m els in
         let els_branch = lambda2mcore' m thn in
