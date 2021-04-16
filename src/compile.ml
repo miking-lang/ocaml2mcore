@@ -82,6 +82,8 @@ module AstHelpers = struct
 
   let app_ a b = TmApp (NoInfo, a, b)
 
+  let app2_ a b c = app_ (app_ a b) c
+
   let record_ binds = TmRecord (NoInfo, record_from_list binds)
 
   let tyrecord_ binds = TyRecord (NoInfo, record_from_list binds)
@@ -162,9 +164,50 @@ module AstHelpers = struct
   let lor_ b1 b2 = mk_ite b1 true_ b2
 
   let not_ b = mk_ite b false_ true_
+
+  let seq_ tms = TmSeq (NoInfo, Mseq.Helpers.of_list tms)
 end
 
 open AstHelpers
+
+let get_args2 args =
+  match args with
+  | [a1; a2] ->
+      (a1, a2)
+  | _ ->
+      failwith "Expected two arguments"
+
+(* Compile arrays into tensors *)
+module Array2Tensor = struct
+  (* Translation of Array.init *)
+  let init args =
+    let a1, a2 = get_args2 args in
+    let shape = seq_ [a1] in
+    let f =
+      lam_ (from_utf8 "x")
+        (app_ a2 (app2_ (const_ (Cget None)) (mk_var "" "x") (int_ 0)))
+    in
+    app2_ (const_ (CtensorCreate None)) shape f
+
+  (* Translation of Array.make *)
+  let make args =
+    let a1, a2 = get_args2 args in
+    let shape = seq_ [a1] in
+    let f = lam_ (from_utf8 "") a2 in
+    app2_ (const_ (CtensorCreate None)) shape f
+
+  (* Translation of Array.iter *)
+  let iter args =
+    let a1, a2 = get_args2 args in
+    (* lam x. x -> lam _. lam x. x *)
+    let f =
+      lam_ (from_utf8 "")
+        (lam_ (from_utf8 "x")
+           (app_ a1
+              (app2_ (const_ (CtensorGetExn None)) (mk_var "" "x") (seq_ [])) ) )
+    in
+    app2_ (const_ (CtensorIteri None)) f a2
+end
 
 (* Global set of MCore files to include *)
 let includes_ref = ref SS.empty
@@ -260,6 +303,7 @@ let typed2lambda typed =
   lamprog
 
 (* Access in modules, either external or in-file defined *)
+(* Arrays are handled in compile_lambda *)
 let rec compile_module_access = function
   (* Standard library I/O and strings *)
   | "Stdlib.print_endline" ->
@@ -462,6 +506,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
       (* NOTE(Linnea, 2021-04-08): Assume integer <, and hope that it fails
          spectacularly if not true *)
       mk_constapp2 (Clti None) args
+  | Pccall {prim_name= "caml_make_vect"} ->
+      Array2Tensor.make args
   | Pccall desc ->
       failwith ("External call " ^ desc.prim_name ^ " not implemented")
   (* Exceptions *)
@@ -708,16 +754,6 @@ and lambda2mcore (lam : Lambda.program) =
         mk_var_ident m ident
     | Lconst c ->
         compile_structured_constant c
-    | Lapply {ap_func= f; ap_args= args} ->
-        let rec mk_app = function
-          | [] ->
-              failwith "Application without a lhs"
-          | [a] ->
-              lambda2mcore' m a
-          | a :: args ->
-              TmApp (NoInfo, mk_app args, lambda2mcore' m a)
-        in
-        mk_app (List.rev (f :: args))
     | Lfunction {params; body} ->
         let rec mk_lambda params body =
           match params with
@@ -880,6 +916,26 @@ and lambda2mcore (lam : Lambda.program) =
     | Lstaticcatch (body, (i, _vars), handler) ->
         add_error_handler i (lambda2mcore' m handler) ;
         lambda2mcore' m body
+    (* Application of array functions *)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.init"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.init (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iter"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.iter (List.map (lambda2mcore' m) args)
+    (* General application *)
+    | Lapply {ap_func= f; ap_args= args} ->
+        let rec mk_app = function
+          | [] ->
+              failwith "Application without a lhs"
+          | [a] ->
+              lambda2mcore' m a
+          | a :: args ->
+              TmApp (NoInfo, mk_app args, lambda2mcore' m a)
+        in
+        mk_app (List.rev (f :: args))
     | Levent _ ->
         failwith "event"
     | Lstringswitch _ ->
