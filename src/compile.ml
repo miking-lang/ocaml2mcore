@@ -172,45 +172,6 @@ end
 
 open AstHelpers
 
-let get_args2 args =
-  match args with
-  | [a1; a2] ->
-      (a1, a2)
-  | _ ->
-      failwith "Expected two arguments"
-
-(* Compile arrays into tensors *)
-module Array2Tensor = struct
-  (* Translation of Array.init *)
-  let init args =
-    let a1, a2 = get_args2 args in
-    let shape = seq_ [a1] in
-    let f =
-      lam_ (from_utf8 "x")
-        (app_ a2 (app2_ (const_ (Cget None)) (mk_var "" "x") (int_ 0)))
-    in
-    app2_ (const_ (CtensorCreate None)) shape f
-
-  (* Translation of Array.make *)
-  let make args =
-    let a1, a2 = get_args2 args in
-    let shape = seq_ [a1] in
-    let f = lam_ (from_utf8 "") a2 in
-    app2_ (const_ (CtensorCreate None)) shape f
-
-  (* Translation of Array.iter *)
-  let iter args =
-    let a1, a2 = get_args2 args in
-    (* lam x. x -> lam _. lam x. x *)
-    let f =
-      lam_ (from_utf8 "")
-        (lam_ (from_utf8 "x")
-           (app_ a1
-              (app2_ (const_ (CtensorGetExn None)) (mk_var "" "x") (seq_ [])) ) )
-    in
-    app2_ (const_ (CtensorIteri None)) f a2
-end
-
 (* Global set of MCore files to include *)
 let includes_ref = ref SS.empty
 
@@ -267,6 +228,54 @@ let get_typedecl () =
 let get_module ident =
   String.split_on_char '.' ident
   |> List.rev |> List.tl |> List.rev |> String.concat "."
+
+let get_args1 args =
+  match args with [a1] -> a1 | _ -> failwith "Expected one argument"
+
+let get_args2 args =
+  match args with
+  | [a1; a2] ->
+      (a1, a2)
+  | _ ->
+      failwith "Expected two arguments"
+
+(* Compile arrays into tensors *)
+module Array2Tensor = struct
+  (* Translation of Array.init *)
+  let init args =
+    let a1, a2 = get_args2 args in
+    let shape = seq_ [a1] in
+    let f =
+      lam_ (from_utf8 "x")
+        (app_ a2 (app2_ (const_ (Cget None)) (mk_var "" "x") (int_ 0)))
+    in
+    app2_ (const_ (CtensorCreate None)) shape f
+
+  (* Translation of Array.make *)
+  let make args =
+    let a1, a2 = get_args2 args in
+    let shape = seq_ [a1] in
+    let f = lam_ (from_utf8 "") a2 in
+    app2_ (const_ (CtensorCreate None)) shape f
+
+  (* Translation of Array.iter *)
+  let iter args =
+    let a1, a2 = get_args2 args in
+    (* lam x. x -> lam _. lam x. x *)
+    let f =
+      lam_ (from_utf8 "")
+        (lam_ (from_utf8 "x")
+           (app_ a1
+              (app2_ (const_ (CtensorGetExn None)) (mk_var "" "x") (seq_ [])) ) )
+    in
+    app2_ (const_ (CtensorIteri None)) f a2
+
+  (* Translation of Array.length *)
+  let length args =
+    let a = get_args1 args in
+    add_include "tensor.mc" ;
+    app_ (mk_var "" "tensorSize") a
+end
 
 (* Parse an OCaml .ml file *)
 let parse_file filename =
@@ -647,13 +656,14 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pbyteslength | Pbytesrefu | Pbytessetu | Pbytesrefs | Pbytessets ->
       failwith "Operations on bytes not implemented"
   (* Array operations *)
+  | Parraylength array_kind ->
+      Array2Tensor.length args
   | Pmakearray (array_kind, mutable_flag) | Pduparray (array_kind, mutable_flag)
     ->
       failwith "Array operation not implemented"
   (* For [Pduparray], the argument must be an immutable array.
       The arguments of [Pduparray] give the kind and mutability of the
       array being *produced* by the duplication. *)
-  | Parraylength array_kind
   | Parrayrefu array_kind
   | Parraysetu array_kind
   | Parrayrefs array_kind
