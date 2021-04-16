@@ -84,6 +84,8 @@ module AstHelpers = struct
 
   let app2_ a b c = app_ (app_ a b) c
 
+  let conapp_ a b = TmConApp (NoInfo, a, Symb.Helpers.nosym, b)
+
   let record_ binds = TmRecord (NoInfo, record_from_list binds)
 
   let tyrecord_ binds = TyRecord (NoInfo, record_from_list binds)
@@ -451,6 +453,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
   (* Operations on heap blocks *)
   | Pmakeblock (_tag, _mut, _shape, Tag_con "::") ->
       mk_constapp2 (Ccons None) args
+  | Pmakeblock (_tag, _mut, _shape, Tag_con s) ->
+      conapp_ (from_utf8 s) (mk_tuple args)
   | Pmakeblock (_tag, _mut, _shape, _) ->
       (* TODO(Linnea, 2021-04-08): handle other tags *)
       mk_tuple args
