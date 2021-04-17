@@ -269,8 +269,15 @@ module Array2Tensor = struct
     let f = lam_ (from_utf8 "") a2 in
     app2_ (const_ (CtensorCreate None)) shape f
 
-  (* Translation of Array.iter *)
-  let iter args =
+  (* Translation of Array.make_matrix *)
+  let make_matrix args =
+    let a1, a2, a3 = get_args3 args in
+    let shape = seq_ [a1; a2] in
+    let f = lam_ (from_utf8 "") a3 in
+    app2_ (const_ (CtensorCreate None)) shape f
+
+  (* Translation of Array.iter for 1d arrays *)
+  let iter1d args =
     let a1, a2 = get_args2 args in
     (* lam x. x -> lam _. lam x. x *)
     let f =
@@ -307,15 +314,33 @@ module Array2Tensor = struct
     in
     copyToTensor a (mkDest a)
 
-  (* Translation of Array.get *)
-  let get args =
+  (* Translation of Array.get for 1d arrays *)
+  let get1d args =
     let a1, a2 = get_args2 args in
     app2_ (const_ (CtensorGetExn None)) a1 (seq_ [a2])
 
-  (* Translation of Array.set *)
-  let set args =
+  (* Translation of Array.get for 2d arrays *)
+  let get2d args =
+    let a1, a2 = get_args2 args in
+    app2_ (const_ (CtensorSliceExn None)) a1 (seq_ [a2])
+
+  (* Translation of Array.set for 1d arrays *)
+  let set1d args =
     let a1, a2, a3 = get_args3 args in
     app3_ (const_ (CtensorSetExn (None, None))) a1 (seq_ [a2]) a3
+
+  (* Translation of Array.set for 2d arrays *)
+  (* TODO: what is the best way to replace a complete row in a tensor? *)
+  let set2d args =
+    let tensor, row, value = get_args3 args in
+    (* Slice out the row and copy the new tensor into it *)
+    let sliceRow tensor row =
+      app2_ (const_ (CtensorSliceExn None)) tensor (seq_ [row])
+    in
+    let copyToTensor src dest =
+      app2_ (const_ (CtensorCopyExn None)) src dest
+    in
+    copyToTensor value (sliceRow tensor row)
 end
 
 (* Parse an OCaml .ml file *)
@@ -367,11 +392,11 @@ let rec compile_module_access = function
               (compile_module_access "Stdlib.string_of_int")
               (mk_var "" "x") ) )
   | "Stdlib.print_float" ->
-    lam_ (from_utf8 "x")
-      (app_ (const_ Cprint)
-         (app_
-            (compile_module_access "Stdlib.string_of_float")
-            (mk_var "" "x") ) )
+      lam_ (from_utf8 "x")
+        (app_ (const_ Cprint)
+           (app_
+              (compile_module_access "Stdlib.string_of_float")
+              (mk_var "" "x") ) )
   | "Stdlib.read_line" ->
       const_ CreadLine
   | "Stdlib.string_of_int" ->
@@ -710,10 +735,14 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pmakearray (array_kind, mutable_flag) | Pduparray (array_kind, mutable_flag)
     ->
       failwith "Array operation not implemented"
-  | Parrayrefs array_kind ->
-      Array2Tensor.get args
-  | Parraysets array_kind ->
-      Array2Tensor.set args
+  | Parrayrefs (Pintarray | Pfloatarray | Pgenarray) ->
+      Array2Tensor.get1d args
+  | Parrayrefs Paddrarray ->
+      Array2Tensor.get2d args
+  | Parraysets (Pintarray | Pfloatarray | Pgenarray) ->
+      Array2Tensor.set1d args
+  | Parraysets Paddrarray ->
+      Array2Tensor.set2d args
   (* For [Pduparray], the argument must be an immutable array.
       The arguments of [Pduparray] give the kind and mutability of the
       array being *produced* by the duplication. *)
@@ -988,11 +1017,16 @@ and lambda2mcore (lam : Lambda.program) =
     | Lapply
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iter"), _, _)
         ; ap_args= args } ->
-        Array2Tensor.iter (List.map (lambda2mcore' m) args)
+        Array2Tensor.iter1d (List.map (lambda2mcore' m) args)
     | Lapply
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.copy"), _, _)
         ; ap_args= args } ->
         Array2Tensor.copy (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func=
+            Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.make_matrix"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.make_matrix (List.map (lambda2mcore' m) args)
     (* General application *)
     | Lapply {ap_func= f; ap_args= args} ->
         let rec mk_app = function

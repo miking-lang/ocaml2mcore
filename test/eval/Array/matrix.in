@@ -1,0 +1,12 @@
+let _ =
+  let a = Array.make_matrix 3 4 0 in
+  a.(1) <- Array.make 4 1;
+  a.(2) <- Array.make 4 2;
+
+  Array.iter print_int a.(0);
+  print_endline "";
+  Array.iter print_int a.(1);
+  print_endline "";
+  Array.iter print_int a.(2);
+
+  ()
