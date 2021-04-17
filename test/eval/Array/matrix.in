@@ -3,6 +3,10 @@ let _ =
   a.(1) <- Array.make 4 1;
   a.(2) <- Array.make 4 2;
 
+  print_string "Length is ";
+  print_int (Array.length a);
+  print_endline "";
+
   Array.iter print_int a.(0);
   print_endline "";
   Array.iter print_int a.(1);

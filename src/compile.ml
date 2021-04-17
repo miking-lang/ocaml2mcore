@@ -291,8 +291,7 @@ module Array2Tensor = struct
   (* Translation of Array.length *)
   let length args =
     let a = get_args1 args in
-    add_include "tensor.mc" ;
-    app_ (mk_var "" "tensorSize") a
+    app2_ (const_ (Cget None)) (app_ (const_ CtensorShape) a) (int_ 0)
 
   (* Translation of Array.copy *)
   let copy args =
@@ -385,6 +384,8 @@ let rec compile_module_access = function
   (* Standard library I/O and strings *)
   | "Stdlib.print_endline" ->
       add_include "common.mc" ; mk_var "" "printLn"
+  | "Stdlib.print_string" ->
+      const_ Cprint
   | "Stdlib.print_int" ->
       lam_ (from_utf8 "x")
         (app_ (const_ Cprint)
@@ -730,7 +731,7 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pbyteslength | Pbytesrefu | Pbytessetu | Pbytesrefs | Pbytessets ->
       failwith "Operations on bytes not implemented"
   (* Array operations *)
-  | Parraylength array_kind ->
+  | Parraylength _ ->
       Array2Tensor.length args
   | Pmakearray (array_kind, mutable_flag) | Pduparray (array_kind, mutable_flag)
     ->
