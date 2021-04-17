@@ -1,0 +1,30 @@
+let _ =
+  let a = Array.init 5 (fun x -> x) in
+  print_int (Array.get a 0);
+  print_int (Array.get a 1);
+  print_int (Array.get a 2);
+  print_int (Array.get a 3);
+  print_int (Array.get a 4);
+  print_endline "";
+
+  print_int (a.(0));
+  print_int (a.(1));
+  print_int (a.(2));
+  print_int (a.(3));
+  print_int (a.(4));
+  print_endline "";
+
+  let a = Array.init 4 (fun x -> 0.0) in
+  print_float (Array.get a 0);
+  print_float (Array.get a 1);
+  print_float (Array.get a 2);
+  print_float (Array.get a 3);
+  print_endline "";
+
+  print_float (a.(0));
+  print_float (a.(1));
+  print_float (a.(2));
+  print_float (a.(3));
+  print_endline "";
+
+  ()

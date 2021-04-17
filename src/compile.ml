@@ -84,6 +84,8 @@ module AstHelpers = struct
 
   let app2_ a b c = app_ (app_ a b) c
 
+  let app3_ a b c d = app_ (app_ (app_ a b) c) d
+
   let conapp_ a b = TmConApp (NoInfo, a, Symb.Helpers.nosym, b)
 
   let record_ binds = TmRecord (NoInfo, record_from_list binds)
@@ -156,6 +158,8 @@ module AstHelpers = struct
         TmConst (NoInfo, CInt i)
 
   let pint_ n = PatInt (NoInfo, n)
+
+  let float_ f = TmConst (NoInfo, CFloat f)
 
   let true_ = TmConst (NoInfo, CBool true)
 
@@ -239,6 +243,13 @@ let get_args2 args =
   | _ ->
       failwith "Expected two arguments"
 
+let get_args3 args =
+  match args with
+  | [a1; a2; a3] ->
+      (a1, a2, a3)
+  | _ ->
+      failwith "Expected two arguments"
+
 (* Compile arrays into tensors *)
 module Array2Tensor = struct
   (* Translation of Array.init *)
@@ -275,6 +286,36 @@ module Array2Tensor = struct
     let a = get_args1 args in
     add_include "tensor.mc" ;
     app_ (mk_var "" "tensorSize") a
+
+  (* Translation of Array.copy *)
+  let copy args =
+    let a = get_args1 args in
+    (* TODO: take type into account, for now assume float *)
+    let copyToTensor src dest =
+      mk_let (from_utf8 "dest") dest
+        (mk_let (from_utf8 "")
+           (app2_ (const_ (CtensorCopyExn None)) src (mk_var "" "dest"))
+           (mk_var "" "dest") )
+    in
+    let mkDest a =
+      mk_let (from_utf8 "shape")
+        (app_ (const_ CtensorShape) a)
+        (app2_
+           (const_ (CtensorCreate None))
+           (mk_var "" "shape")
+           (lam_ (from_utf8 "") (float_ 0.0)) )
+    in
+    copyToTensor a (mkDest a)
+
+  (* Translation of Array.get *)
+  let get args =
+    let a1, a2 = get_args2 args in
+    app2_ (const_ (CtensorGetExn None)) a1 (seq_ [a2])
+
+  (* Translation of Array.set *)
+  let set args =
+    let a1, a2, a3 = get_args3 args in
+    app3_ (const_ (CtensorSetExn (None, None))) a1 (seq_ [a2]) a3
 end
 
 (* Parse an OCaml .ml file *)
@@ -314,7 +355,7 @@ let typed2lambda typed =
   lamprog
 
 (* Access in modules, either external or in-file defined *)
-(* Arrays are handled in compile_lambda *)
+(* Arrays are handled in Array2Tensor *)
 let rec compile_module_access = function
   (* Standard library I/O and strings *)
   | "Stdlib.print_endline" ->
@@ -325,10 +366,18 @@ let rec compile_module_access = function
            (app_
               (compile_module_access "Stdlib.string_of_int")
               (mk_var "" "x") ) )
+  | "Stdlib.print_float" ->
+    lam_ (from_utf8 "x")
+      (app_ (const_ Cprint)
+         (app_
+            (compile_module_access "Stdlib.string_of_float")
+            (mk_var "" "x") ) )
   | "Stdlib.read_line" ->
       const_ CreadLine
   | "Stdlib.string_of_int" ->
       add_include "string.mc" ; mk_var "" "int2string"
+  | "Stdlib.string_of_float" ->
+      add_include "string.mc" ; mk_var "" "float2string"
   | "Stdlib.^" ->
       TmConst (NoInfo, Cconcat None)
   | "Stdlib.Char.escaped" ->
@@ -375,7 +424,7 @@ let compile_constant = function
          therefore change in the future. *)
       int_ (int_of_char c)
   | Const_float f ->
-      TmConst (NoInfo, CFloat (float_of_string f))
+      float_ (float_of_string f)
   (* TODO(Linnea, 2021-03-10): What does the delim do? *)
   | Const_string (str, delim) ->
       mk_string str
@@ -661,13 +710,14 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pmakearray (array_kind, mutable_flag) | Pduparray (array_kind, mutable_flag)
     ->
       failwith "Array operation not implemented"
+  | Parrayrefs array_kind ->
+      Array2Tensor.get args
+  | Parraysets array_kind ->
+      Array2Tensor.set args
   (* For [Pduparray], the argument must be an immutable array.
       The arguments of [Pduparray] give the kind and mutability of the
       array being *produced* by the duplication. *)
-  | Parrayrefu array_kind
-  | Parraysetu array_kind
-  | Parrayrefs array_kind
-  | Parraysets array_kind ->
+  | Parrayrefu array_kind | Parraysetu array_kind ->
       failwith "Array operation not implemented"
   | Pisint ->
       failwith "Array operation not implemented"
@@ -939,6 +989,10 @@ and lambda2mcore (lam : Lambda.program) =
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iter"), _, _)
         ; ap_args= args } ->
         Array2Tensor.iter (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.copy"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.copy (List.map (lambda2mcore' m) args)
     (* General application *)
     | Lapply {ap_func= f; ap_args= args} ->
         let rec mk_app = function

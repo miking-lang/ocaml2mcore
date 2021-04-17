@@ -1,0 +1,2 @@
+let plusone = (+) 1 in
+print_int (plusone 1)

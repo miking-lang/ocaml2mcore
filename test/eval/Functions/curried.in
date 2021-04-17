@@ -1,0 +1,4 @@
+let x = 1 in
+let foo x y = x + y in
+let bar = foo x in
+print_int (bar 2)
