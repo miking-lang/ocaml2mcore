@@ -1,0 +1,4 @@
+let _ =
+  let a = Array.make 5 0.0 in
+  let aa = Array.map (fun x -> 1.0) a in
+  Array.iteri (fun i x -> print_int i; print_float x; print_endline "") aa

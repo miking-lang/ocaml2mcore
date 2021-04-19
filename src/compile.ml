@@ -269,6 +269,13 @@ module Array2Tensor = struct
     let f = lam_ (from_utf8 "") a2 in
     app2_ (const_ (CtensorCreate None)) shape f
 
+  (* Translation of Array.create_float *)
+  let create_float args =
+    let a = get_args1 args in
+    let shape = seq_ [a] in
+    let f = lam_ (from_utf8 "") (float_ 0.0) in
+    app2_ (const_ (CtensorCreate None)) shape f
+
   (* Translation of Array.make_matrix *)
   let make_matrix args =
     let a1, a2, a3 = get_args3 args in
@@ -310,10 +317,10 @@ module Array2Tensor = struct
     let a = get_args1 args in
     (* TODO: take type into account, for now assume float *)
     let copyToTensor src dest =
-      mk_let (from_utf8 "dest") dest
+      mk_let (from_utf8 "dest_copy") dest
         (mk_let (from_utf8 "")
-           (app2_ (const_ (CtensorCopyExn None)) src (mk_var "" "dest"))
-           (mk_var "" "dest") )
+           (app2_ (const_ (CtensorCopyExn None)) src (mk_var "" "dest_copy"))
+           (mk_var "" "dest_copy") )
     in
     let mkDest a =
       mk_let (from_utf8 "shape")
@@ -324,6 +331,18 @@ module Array2Tensor = struct
            (lam_ (from_utf8 "") (float_ 0.0)) )
     in
     copyToTensor a (mkDest a)
+
+  (* Translation of Array.map for 1d arrays *)
+  (* TODO: take type into account, for now assume float *)
+  let map1d args =
+    let f, src = get_args2 args in
+    add_include "tensor.mc" ;
+    let dest = copy [src] in
+    let mk_map dest = app3_ (mk_var "" "tensorMapExn") f src dest in
+    mk_let (from_utf8 "dest_map") dest
+      (mk_let (from_utf8 "")
+         (mk_map (mk_var "" "dest_map"))
+         (mk_var "" "dest_map") )
 
   (* Translation of Array.get for 1d arrays *)
   let get1d args =
@@ -352,6 +371,8 @@ module Array2Tensor = struct
       app2_ (const_ (CtensorCopyExn None)) src dest
     in
     copyToTensor value (sliceRow tensor row)
+
+  (* TODO: Array. blit *)
 end
 
 (* Parse an OCaml .ml file *)
@@ -608,6 +629,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
       mk_constapp2 (Clti None) args
   | Pccall {prim_name= "caml_make_vect"} ->
       Array2Tensor.make args
+  | Pccall {prim_name= "caml_make_float_vect"} ->
+      Array2Tensor.create_float args
   | Pccall desc ->
       failwith ("External call " ^ desc.prim_name ^ " not implemented")
   (* Exceptions *)
@@ -1044,6 +1067,10 @@ and lambda2mcore (lam : Lambda.program) =
             Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.make_matrix"), _, _)
         ; ap_args= args } ->
         Array2Tensor.make_matrix (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.map"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.map1d (List.map (lambda2mcore' m) args)
     (* General application *)
     | Lapply {ap_func= f; ap_args= args} ->
         let rec mk_app = function
