@@ -279,11 +279,23 @@ module Array2Tensor = struct
   (* Translation of Array.iter for 1d arrays *)
   let iter1d args =
     let a1, a2 = get_args2 args in
-    (* lam x. x -> lam _. lam x. x *)
+    (* f x -> lam. f (tensorGetExn x []) *)
     let f =
       lam_ (from_utf8 "")
         (lam_ (from_utf8 "x")
            (app_ a1
+              (app2_ (const_ (CtensorGetExn None)) (mk_var "" "x") (seq_ [])) ) )
+    in
+    app2_ (const_ (CtensorIteri None)) f a2
+
+  (* Translation of Array.iteri for 1d arrays *)
+  let iteri1d args =
+    let a1, a2 = get_args2 args in
+    (* f i x -> f i (tensorGetExn x []) *)
+    let f =
+      lam_ (from_utf8 "i")
+        (lam_ (from_utf8 "x")
+           (app2_ a1 (mk_var "" "i")
               (app2_ (const_ (CtensorGetExn None)) (mk_var "" "x") (seq_ [])) ) )
     in
     app2_ (const_ (CtensorIteri None)) f a2
@@ -1019,6 +1031,10 @@ and lambda2mcore (lam : Lambda.program) =
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iter"), _, _)
         ; ap_args= args } ->
         Array2Tensor.iter1d (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iteri"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.iteri1d (List.map (lambda2mcore' m) args)
     | Lapply
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.copy"), _, _)
         ; ap_args= args } ->
