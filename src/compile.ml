@@ -250,7 +250,7 @@ let get_args3 args =
   | _ ->
       failwith "Expected two arguments"
 
-(* Compile arrays into tensors *)
+(* Compile arrays into tensors. Type 'a array becomes Tensor['a] of rank 1 *)
 module Array2Tensor = struct
   (* Translation of Array.init *)
   let init args =
@@ -278,13 +278,13 @@ module Array2Tensor = struct
 
   (* Translation of Array.make_matrix *)
   let make_matrix args =
-    let a1, a2, a3 = get_args3 args in
-    let shape = seq_ [a1; a2] in
-    let f = lam_ (from_utf8 "") a3 in
-    app2_ (const_ (CtensorCreate None)) shape f
+    let nrows, ncols, v = get_args3 args in
+    let shape = seq_ [nrows] in
+    let mk_row ncols v = lam_ (from_utf8 "") (make [ncols; v]) in
+    app2_ (const_ (CtensorCreate None)) shape (mk_row ncols v)
 
   (* Translation of Array.iter for 1d arrays *)
-  let iter1d args =
+  let iter args =
     let a1, a2 = get_args2 args in
     (* f x -> lam. f (tensorGetExn x []) *)
     let f =
@@ -296,7 +296,7 @@ module Array2Tensor = struct
     app2_ (const_ (CtensorIteri None)) f a2
 
   (* Translation of Array.iteri for 1d arrays *)
-  let iteri1d args =
+  let iteri args =
     let a1, a2 = get_args2 args in
     (* f i x -> f i (tensorGetExn x []) *)
     let f =
@@ -332,9 +332,9 @@ module Array2Tensor = struct
     in
     copyToTensor a (mkDest a)
 
-  (* Translation of Array.map for 1d arrays *)
+  (* Translation of Array.map *)
   (* TODO: take type into account, for now assume float *)
-  let map1d args =
+  let map args =
     let f, src = get_args2 args in
     add_include "tensor.mc" ;
     let dest = copy [src] in
@@ -344,33 +344,29 @@ module Array2Tensor = struct
          (mk_map (mk_var "" "dest_map"))
          (mk_var "" "dest_map") )
 
-  (* Translation of Array.get for 1d arrays *)
-  let get1d args =
+  (* Translation of Array.get *)
+  let get args =
     let a1, a2 = get_args2 args in
     app2_ (const_ (CtensorGetExn None)) a1 (seq_ [a2])
 
-  (* Translation of Array.get for 2d arrays *)
-  let get2d args =
-    let a1, a2 = get_args2 args in
-    app2_ (const_ (CtensorSliceExn None)) a1 (seq_ [a2])
-
-  (* Translation of Array.set for 1d arrays *)
-  let set1d args =
+  (* Translation of Array.set *)
+  let set args =
     let a1, a2, a3 = get_args3 args in
     app3_ (const_ (CtensorSetExn (None, None))) a1 (seq_ [a2]) a3
 
-  (* Translation of Array.set for 2d arrays *)
-  (* TODO: what is the best way to replace a complete row in a tensor? *)
-  let set2d args =
-    let tensor, row, value = get_args3 args in
-    (* Slice out the row and copy the new tensor into it *)
-    let sliceRow tensor row =
-      app2_ (const_ (CtensorSliceExn None)) tensor (seq_ [row])
-    in
-    let copyToTensor src dest =
-      app2_ (const_ (CtensorCopyExn None)) src dest
-    in
-    copyToTensor value (sliceRow tensor row)
+  (* Translation of Array.of_list *)
+  let of_list args =
+    let lst = get_args1 args in
+    let shape = seq_ [app_ (const_ Clength) lst] in
+    app2_
+      (const_ (CtensorCreate None))
+      shape
+      (lam_ (from_utf8 "i")
+         (app2_ (const_ (Cget None)) lst
+            (app2_ (const_ (Cget None)) (mk_var "" "i") (int_ 0)) ) )
+
+  (* Compile Sys.argv *)
+  let argv = of_list [mk_var "" "argv"]
 
   (* TODO: Array. blit *)
 end
@@ -510,7 +506,7 @@ let rec compile_structured_constant = function
   | Const_pointer (1, Ptr_bool) ->
       true_
   | Const_pointer _ ->
-      failwith "const_pointer"
+      tmUnit
   | Const_block (tag, str_const_list, (Tag_record | Tag_tuple)) ->
       let consts = List.map compile_structured_constant str_const_list in
       mk_tuple consts
@@ -528,7 +524,7 @@ let rec compile_structured_constant = function
         | _ ->
             failwith "Expected cons or empty list"
       in
-      let elems = collect_list [] c in
+      let elems = List.rev (collect_list [] c) in
       TmSeq (NoInfo, Mseq.Helpers.of_list elems)
   | Const_block (tag, str_const_list, Tag_con name) ->
       let consts = List.map compile_structured_constant str_const_list in
@@ -631,6 +627,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
       Array2Tensor.make args
   | Pccall {prim_name= "caml_make_float_vect"} ->
       Array2Tensor.create_float args
+  | Pccall {prim_name= "caml_sys_argv"} ->
+      Array2Tensor.argv
   | Pccall desc ->
       failwith ("External call " ^ desc.prim_name ^ " not implemented")
   (* Exceptions *)
@@ -771,14 +769,10 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pmakearray (array_kind, mutable_flag) | Pduparray (array_kind, mutable_flag)
     ->
       failwith "Array operation not implemented"
-  | Parrayrefs (Pintarray | Pfloatarray | Pgenarray) ->
-      Array2Tensor.get1d args
-  | Parrayrefs Paddrarray ->
-      Array2Tensor.get2d args
-  | Parraysets (Pintarray | Pfloatarray | Pgenarray) ->
-      Array2Tensor.set1d args
-  | Parraysets Paddrarray ->
-      Array2Tensor.set2d args
+  | Parrayrefs _ ->
+      Array2Tensor.get args
+  | Parraysets _ ->
+      Array2Tensor.set args
   (* For [Pduparray], the argument must be an immutable array.
       The arguments of [Pduparray] give the kind and mutability of the
       array being *produced* by the duplication. *)
@@ -1053,11 +1047,11 @@ and lambda2mcore (lam : Lambda.program) =
     | Lapply
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iter"), _, _)
         ; ap_args= args } ->
-        Array2Tensor.iter1d (List.map (lambda2mcore' m) args)
+        Array2Tensor.iter (List.map (lambda2mcore' m) args)
     | Lapply
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iteri"), _, _)
         ; ap_args= args } ->
-        Array2Tensor.iteri1d (List.map (lambda2mcore' m) args)
+        Array2Tensor.iteri (List.map (lambda2mcore' m) args)
     | Lapply
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.copy"), _, _)
         ; ap_args= args } ->
@@ -1070,7 +1064,12 @@ and lambda2mcore (lam : Lambda.program) =
     | Lapply
         { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.map"), _, _)
         ; ap_args= args } ->
-        Array2Tensor.map1d (List.map (lambda2mcore' m) args)
+        Array2Tensor.map (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func=
+            Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.of_list"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.of_list (List.map (lambda2mcore' m) args)
     (* General application *)
     | Lapply {ap_func= f; ap_args= args} ->
         let rec mk_app = function
