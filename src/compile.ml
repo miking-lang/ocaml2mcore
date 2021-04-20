@@ -289,6 +289,7 @@ let get_args3 args =
       failwith "Expected three arguments"
 
 (* Compile arrays into tensors. Type 'a array becomes Tensor['a] of rank 1 *)
+(* TODO: handle currying *)
 module Array2Tensor = struct
   (* Translation of Array.init *)
   let init args =
