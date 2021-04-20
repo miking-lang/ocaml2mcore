@@ -1082,12 +1082,13 @@ and lambda2mcore (lam : Lambda.program) =
               TmApp (NoInfo, mk_app args, lambda2mcore' m a)
         in
         mk_app (List.rev (f :: args))
+    | Ltrywith (lbody, _param, _lhandler) ->
+        (* NOTE: Does not catch the error*)
+        lambda2mcore' m lbody
     | Levent _ ->
         failwith "event"
     | Lstringswitch _ ->
         failwith "stringswitch"
-    | Ltrywith _ ->
-        failwith "trywith"
     | Lwhile _ ->
         failwith "while"
     | Lfor _ ->
