@@ -286,7 +286,7 @@ let get_args3 args =
   | [a1; a2; a3] ->
       (a1, a2, a3)
   | _ ->
-      failwith "Expected two arguments"
+      failwith "Expected three arguments"
 
 (* Compile arrays into tensors. Type 'a array becomes Tensor['a] of rank 1 *)
 module Array2Tensor = struct
@@ -381,6 +381,25 @@ module Array2Tensor = struct
       (mk_let (from_utf8 "")
          (mk_map (mk_var "" "dest_map"))
          (mk_var "" "dest_map") )
+
+  let fold_left args =
+    let f, init, a = get_args3 args in
+    let tensorFoldl =
+      Boot.Parserutils.parse_mexpr_string
+        (from_utf8
+           "let tensorFoldl = lam f. lam acc. lam t.\n\
+           \  let stop = get (tensorShape t) 0 in\n\
+           \  recursive let work = lam i. lam acc.\n\
+           \    if geqi i stop then acc\n\
+           \    else work (addi i 1) (f acc (tensorGetExn t [i]))\n\
+           \  in work 0 acc in ()\n" )
+    in
+    match tensorFoldl with
+    | TmLet (fi, ident, symb, ty, body, _) ->
+        TmLet
+          (fi, ident, symb, ty, body, app3_ (mk_var "" "tensorFoldl") f init a)
+    | _ ->
+        failwith "Array2Tensor.fold_left not correct"
 
   (* Translation of Array.get *)
   let get args =
@@ -637,6 +656,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
           failwith (sprintf "Out of bounds access in cons: %d" n) )
     | _ ->
         failwith "Expected one argument to Pfield immediate" )
+  | Pfield (n, Pointer, Immutable, Fnone) ->
+      failwith "here"
   | Pfield (_, _, _, _) ->
       failwith "Pfield"
   | Pfield_computed
@@ -1108,6 +1129,11 @@ and lambda2mcore (lam : Lambda.program) =
             Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.of_list"), _, _)
         ; ap_args= args } ->
         Array2Tensor.of_list (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func=
+            Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.fold_left"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.fold_left (List.map (lambda2mcore' m) args)
     (* General application *)
     | Lapply {ap_func= f; ap_args= args} ->
         let rec mk_app = function
