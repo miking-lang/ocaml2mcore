@@ -172,6 +172,44 @@ module AstHelpers = struct
   let not_ b = mk_ite b false_ true_
 
   let seq_ tms = TmSeq (NoInfo, Mseq.Helpers.of_list tms)
+
+  let if_ cond thn els =
+    TmMatch (NoInfo, cond, PatBool (NoInfo, true), thn, els)
+
+  let _mk_for param_str fun_str stop_fun next_fun body =
+    let for_loop inexpr =
+      TmRecLets
+        ( NoInfo
+        , [ ( NoInfo
+            , from_utf8 fun_str
+            , Symb.Helpers.nosym
+            , TyUnknown NoInfo
+            , lam_ (from_utf8 param_str)
+                (lam_ (from_utf8 "stop")
+                   ((if_
+                       (app2_ stop_fun (mk_var "" param_str) (mk_var "" "stop"))
+                       tmUnit )
+                      (mk_let (from_utf8 "") body
+                         (app2_ (mk_var "" fun_str)
+                            (app2_ next_fun (mk_var "" param_str) (int_ 1))
+                            (mk_var "" "stop") ) ) ) ) ) ]
+        , inexpr )
+    in
+    for_loop
+
+  let mk_for_upto param_str start stop body =
+    let for_loop =
+      _mk_for param_str "for_upto" (const_ (Cgeqi None)) (const_ (Caddi None))
+        body
+    in
+    for_loop (app2_ (mk_var "" "for_upto") start stop)
+
+  let mk_for_downto param_str start stop body =
+    let for_loop =
+      _mk_for param_str "for_downto" (const_ (Cleqi None))
+        (const_ (Csubi None)) body
+    in
+    for_loop (app2_ (mk_var "" "for_downto") start stop)
 end
 
 open AstHelpers
@@ -283,7 +321,7 @@ module Array2Tensor = struct
     let mk_row ncols v = lam_ (from_utf8 "") (make [ncols; v]) in
     app2_ (const_ (CtensorCreate None)) shape (mk_row ncols v)
 
-  (* Translation of Array.iter for 1d arrays *)
+  (* Translation of Array.iter *)
   let iter args =
     let a1, a2 = get_args2 args in
     (* f x -> lam. f (tensorGetExn x []) *)
@@ -295,7 +333,7 @@ module Array2Tensor = struct
     in
     app2_ (const_ (CtensorIteri None)) f a2
 
-  (* Translation of Array.iteri for 1d arrays *)
+  (* Translation of Array.iteri *)
   let iteri args =
     let a1, a2 = get_args2 args in
     (* f i x -> f i (tensorGetExn x []) *)
@@ -1084,14 +1122,18 @@ and lambda2mcore (lam : Lambda.program) =
     | Ltrywith (lbody, _param, _lhandler) ->
         (* NOTE: Does not catch the error*)
         lambda2mcore' m lbody
+    | Lfor (ident, start, stop, dir, body) ->
+        let loop_maker =
+          match dir with Upto -> mk_for_upto | Downto -> mk_for_downto
+        in
+        loop_maker (ident2varstr m ident) (lambda2mcore' m start)
+          (lambda2mcore' m stop) (lambda2mcore' m body)
     | Levent _ ->
         failwith "event"
     | Lstringswitch _ ->
         failwith "stringswitch"
     | Lwhile _ ->
         failwith "while"
-    | Lfor _ ->
-        failwith "for"
     | Lassign _ ->
         failwith "assign"
     | Lsend _ ->
