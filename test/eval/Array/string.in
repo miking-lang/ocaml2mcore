@@ -1,0 +1,5 @@
+
+let _ =
+  let a = Array.make 5 "hatt" in
+  print_endline (a.(0));
+  Array.iter print_endline a
