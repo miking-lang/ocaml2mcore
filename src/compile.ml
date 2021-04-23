@@ -1196,10 +1196,7 @@ let mcore_compile str =
         let oc = open_out (ocaml_out_prefix ^ ".mc") in
         fprintf oc "%s\n" str ;
         close_out oc ;
-        Sys.command
-          (sprintf "mi %s/../src/main/mi.mc -- compile %s.mc" mcore_stdlib
-             ocaml_out_prefix )
-        |> ignore
+        Sys.command (sprintf "mi compile %s.mc" ocaml_out_prefix) |> ignore
     | None ->
         failwith "Source-to-source compilation requires MCORE_STDLIB to be set"
   else ()
