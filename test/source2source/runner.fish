@@ -36,8 +36,8 @@ echo "```" 1>&2
 
 if test $has_failed -ne 1
     echo "### OCaml program" 1>&2
-    echo "Command: `mi $miking_dir/src/main/mi.mc -- compile $comp_out`" 1>&2
-    command         mi $miking_dir/src/main/mi.mc -- compile $comp_out
+    echo "Command: `mi compile $comp_out`" 1>&2
+    command         mi compile $comp_out
     set code $status
 
     echo "Program:" 1>&2
