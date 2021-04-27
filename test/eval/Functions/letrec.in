@@ -1,0 +1,6 @@
+let rec foo x =
+  bar x
+and bar x =
+  42
+in
+print_int (foo ())

@@ -1,3 +1,0 @@
-let foo a b c =
-  a + b + c
-in foo 1 2 3

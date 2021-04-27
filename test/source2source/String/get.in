@@ -1,0 +1,6 @@
+let printChar c =
+  print_endline ("\'" ^ (Char.escaped c) ^ "\'")
+
+let _ =
+  let s = "hello" in
+  printChar (String.get s 3)

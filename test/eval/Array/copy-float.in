@@ -1,0 +1,6 @@
+let _ =
+  let a = Array.make 5 0.0 in
+  let aa = Array.copy a in
+  Array.set a 0 1.0;
+  Array.iter (fun x -> x |> string_of_float |> print_endline) aa;
+  Array.iter (fun x -> x |> string_of_float |> print_endline) a

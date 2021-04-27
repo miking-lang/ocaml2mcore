@@ -1,0 +1,1 @@
+print_int (let v = 1 in v)

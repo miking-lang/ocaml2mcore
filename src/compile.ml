@@ -32,125 +32,187 @@ let filename = prefix ^ ".ml"
 
 let modulename = "Test"
 
-(* MCore no-op instruction *)
-let mcore_noop = tmUnit
-
-(* Pretty print an MExpr AST *)
-let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
-
-(* AST helper functions *)
 let int2ustring = Boot.Ustring.Op.ustring_of_int
 
-let mk_ident m ident = from_utf8 (m ^ Ident.name ident)
+let pprint_mcore tm = to_utf8 (ustring_of_tm tm)
 
-let mk_string str =
-  TmSeq
-    ( NoInfo
-    , Mseq.Helpers.map
-        (fun x -> TmConst (NoInfo, CChar x))
-        (from_latin1 str |> Mseq.Helpers.of_ustring) )
+(* Name mangling *)
+let ident2varstr m ident =
+  match m with "" -> Ident.unique_name ident | _ -> Ident.name ident
 
-let mk_let ident body inexpr =
-  TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
+(* Module strings are already unique *)
+let ident2modstr ident = Ident.name ident
 
-let lam_ ident body =
-  TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
+let append_module_ident m ident = m ^ ident2modstr ident ^ "."
 
-let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
+let mangle m s = m ^ s
 
-let mk_ite cnd thn els = TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
+let ident2mangled m ident =
+  ident |> ident2varstr m |> mangle m |> Boot.Ustring.from_utf8
 
-let mk_var m s = TmVar (NoInfo, from_utf8 (m ^ s), Symb.Helpers.nosym)
+module AstHelpers = struct
+  let mcore_noop = tmUnit
 
-let mk_var_ident m ident = mk_var m (Ident.name ident)
+  let mk_string str =
+    TmSeq
+      ( NoInfo
+      , Mseq.Helpers.map
+          (fun x -> TmConst (NoInfo, CChar x))
+          (from_latin1 str |> Mseq.Helpers.of_ustring) )
 
-let record_from_list binds =
-  List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
+  let mk_let ident body inexpr =
+    TmLet (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body, inexpr)
 
-let const_ c = TmConst (NoInfo, c)
+  let lam_ ident body =
+    TmLam (NoInfo, ident, Symb.Helpers.nosym, TyUnknown NoInfo, body)
 
-let app_ a b = TmApp (NoInfo, a, b)
+  let mk_seq body inexpr = mk_let (from_utf8 "") body inexpr
 
-let record_ binds = TmRecord (NoInfo, record_from_list binds)
+  let mk_ite cnd thn els =
+    TmMatch (NoInfo, cnd, PatBool (NoInfo, true), thn, els)
 
-let tyrecord_ binds = TyRecord (NoInfo, record_from_list binds)
+  let mk_var m s = TmVar (NoInfo, from_utf8 (mangle m s), Symb.Helpers.nosym)
 
-let precord_ binds = PatRecord (NoInfo, record_from_list binds)
+  let mk_var_ident m ident = mk_var m (ident2varstr m ident)
 
-let tyarrow_ l h = TyArrow (NoInfo, l, h)
+  let record_from_list binds =
+    List.fold_left (fun a (k, v) -> Record.add k v a) Record.empty binds
 
-let tyvar_ s = TyVar (NoInfo, from_utf8 s, Symb.Helpers.nosym)
+  let const_ c = TmConst (NoInfo, c)
 
-let tyunknown_ = TyUnknown NoInfo
+  let app_ a b = TmApp (NoInfo, a, b)
 
-let pcon_ c p = PatCon (NoInfo, from_utf8 c, Symb.Helpers.nosym, p)
+  let app2_ a b c = app_ (app_ a b) c
 
-let pnamed_ s = PatNamed (NoInfo, NameStr (s, Symb.Helpers.nosym))
+  let app3_ a b c d = app_ (app_ (app_ a b) c) d
 
-let pwild_ = PatNamed (NoInfo, NameWildcard)
+  let conapp_ a b = TmConApp (NoInfo, a, Symb.Helpers.nosym, b)
 
-let mk_tuple fields =
-  let rec work n binds = function
-    | [] ->
-        record_ binds
-    | x :: xs ->
-        work (n + 1) ((int2ustring n, x) :: binds) xs
-  in
-  work 0 [] fields
+  let record_ binds = TmRecord (NoInfo, record_from_list binds)
 
-let mk_tuple_proj n r =
-  TmMatch
-    ( NoInfo
-    , r
-    , PatRecord
+  let tyrecord_ binds = TyRecord (NoInfo, record_from_list binds)
+
+  let precord_ binds = PatRecord (NoInfo, record_from_list binds)
+
+  let tyarrow_ l h = TyArrow (NoInfo, l, h)
+
+  let tyvar_ s = TyVar (NoInfo, from_utf8 s, Symb.Helpers.nosym)
+
+  let tyunknown_ = TyUnknown NoInfo
+
+  let pcon_ c p = PatCon (NoInfo, from_utf8 c, Symb.Helpers.nosym, p)
+
+  let pnamed_ s = PatNamed (NoInfo, NameStr (s, Symb.Helpers.nosym))
+
+  let pwild_ = PatNamed (NoInfo, NameWildcard)
+
+  let mk_tuple fields =
+    let rec work n binds = function
+      | [] ->
+          record_ binds
+      | x :: xs ->
+          work (n + 1) ((int2ustring n, x) :: binds) xs
+    in
+    work 0 [] fields
+
+  let mk_tuple_proj n r =
+    TmMatch
+      ( NoInfo
+      , r
+      , PatRecord
+          ( NoInfo
+          , record_from_list
+              [ ( int2ustring n
+                , PatNamed (NoInfo, NameStr (from_utf8 "x", Symb.Helpers.nosym))
+                ) ] )
+      , mk_var "" "x"
+      , TmNever NoInfo )
+
+  let fail_constapp f args =
+    failwith
+      ( "Incorrect application. Function: "
+      ^ to_utf8 (ustring_of_const f)
+      ^ ", arguments: "
+      ^ String.concat " " (List.map (fun x -> ustring_of_tm x |> to_utf8) args)
+      )
+
+  let mk_constapp1 op args =
+    match args with
+    | [a] ->
+        TmApp (NoInfo, TmConst (NoInfo, op), a)
+    | _ ->
+        fail_constapp op args
+
+  let mk_constapp2 op args =
+    match args with
+    | [a1; a2] ->
+        TmApp (NoInfo, TmApp (NoInfo, TmConst (NoInfo, op), a1), a2)
+    | _ ->
+        fail_constapp op args
+
+  let int_ = function
+    | i when i < 0 ->
+        (* NOTE(Linnea, 2021-03-17): Use negi to ensure parsability *)
+        TmApp (NoInfo, TmConst (NoInfo, Cnegi), TmConst (NoInfo, CInt (-i)))
+    | i ->
+        TmConst (NoInfo, CInt i)
+
+  let pint_ n = PatInt (NoInfo, n)
+
+  let float_ f = TmConst (NoInfo, CFloat f)
+
+  let true_ = TmConst (NoInfo, CBool true)
+
+  let false_ = TmConst (NoInfo, CBool false)
+
+  let land_ b1 b2 = mk_ite b1 b2 false_
+
+  let lor_ b1 b2 = mk_ite b1 true_ b2
+
+  let not_ b = mk_ite b false_ true_
+
+  let seq_ tms = TmSeq (NoInfo, Mseq.Helpers.of_list tms)
+
+  let if_ cond thn els =
+    TmMatch (NoInfo, cond, PatBool (NoInfo, true), thn, els)
+
+  let _mk_for param_str fun_str stop_fun next_fun body =
+    let for_loop inexpr =
+      TmRecLets
         ( NoInfo
-        , record_from_list
-            [ ( int2ustring n
-              , PatNamed (NoInfo, NameStr (from_utf8 "x", Symb.Helpers.nosym))
-              ) ] )
-    , mk_var "" "x"
-    , TmNever NoInfo )
+        , [ ( NoInfo
+            , from_utf8 fun_str
+            , Symb.Helpers.nosym
+            , TyUnknown NoInfo
+            , lam_ (from_utf8 param_str)
+                (lam_ (from_utf8 "stop")
+                   ((if_
+                       (app2_ stop_fun (mk_var "" param_str) (mk_var "" "stop"))
+                       tmUnit )
+                      (mk_let (from_utf8 "") body
+                         (app2_ (mk_var "" fun_str)
+                            (app2_ next_fun (mk_var "" param_str) (int_ 1))
+                            (mk_var "" "stop") ) ) ) ) ) ]
+        , inexpr )
+    in
+    for_loop
 
-let fail_constapp f args =
-  failwith
-    ( "Incorrect application. Function: "
-    ^ to_utf8 (ustring_of_const f)
-    ^ ", arguments: "
-    ^ String.concat " " (List.map (fun x -> ustring_of_tm x |> to_utf8) args)
-    )
+  let mk_for_upto param_str start stop body =
+    let for_loop =
+      _mk_for param_str "for_upto" (const_ (Cgeqi None)) (const_ (Caddi None))
+        body
+    in
+    for_loop (app2_ (mk_var "" "for_upto") start stop)
 
-let mk_constapp1 op args =
-  match args with
-  | [a] ->
-      TmApp (NoInfo, TmConst (NoInfo, op), a)
-  | _ ->
-      fail_constapp op args
+  let mk_for_downto param_str start stop body =
+    let for_loop =
+      _mk_for param_str "for_downto" (const_ (Cleqi None))
+        (const_ (Csubi None)) body
+    in
+    for_loop (app2_ (mk_var "" "for_downto") start stop)
+end
 
-let mk_constapp2 op args =
-  match args with
-  | [a1; a2] ->
-      TmApp (NoInfo, TmApp (NoInfo, TmConst (NoInfo, op), a1), a2)
-  | _ ->
-      fail_constapp op args
-
-let int_ = function
-  | i when i < 0 ->
-      (* NOTE(Linnea, 2021-03-17): Use negi to ensure parsability *)
-      TmApp (NoInfo, TmConst (NoInfo, Cnegi), TmConst (NoInfo, CInt (-i)))
-  | i ->
-      TmConst (NoInfo, CInt i)
-
-let pint_ n = PatInt (NoInfo, n)
-
-let true_ = TmConst (NoInfo, CBool true)
-
-let false_ = TmConst (NoInfo, CBool false)
-
-let land_ b1 b2 = mk_ite b1 b2 false_
-
-let lor_ b1 b2 = mk_ite b1 true_ b2
-
-let not_ b = mk_ite b false_ true_
+open AstHelpers
 
 (* Global set of MCore files to include *)
 let includes_ref = ref SS.empty
@@ -209,6 +271,164 @@ let get_module ident =
   String.split_on_char '.' ident
   |> List.rev |> List.tl |> List.rev |> String.concat "."
 
+let get_args1 args =
+  match args with [a1] -> a1 | _ -> failwith "Expected one argument"
+
+let get_args2 args =
+  match args with
+  | [a1; a2] ->
+      (a1, a2)
+  | _ ->
+      failwith "Expected two arguments"
+
+let get_args3 args =
+  match args with
+  | [a1; a2; a3] ->
+      (a1, a2, a3)
+  | _ ->
+      failwith "Expected three arguments"
+
+(* Compile arrays into tensors. Type 'a array becomes Tensor['a] of rank 1 *)
+(* TODO: handle currying *)
+module Array2Tensor = struct
+  (* Translation of Array.init *)
+  let init args =
+    let a1, a2 = get_args2 args in
+    let shape = seq_ [a1] in
+    let f =
+      lam_ (from_utf8 "x")
+        (app_ a2 (app2_ (const_ (Cget None)) (mk_var "" "x") (int_ 0)))
+    in
+    app2_ (const_ (CtensorCreate None)) shape f
+
+  (* Translation of Array.make *)
+  let make args =
+    let a1, a2 = get_args2 args in
+    let shape = seq_ [a1] in
+    let f = lam_ (from_utf8 "") a2 in
+    app2_ (const_ (CtensorCreate None)) shape f
+
+  (* Translation of Array.create_float *)
+  let create_float args =
+    let a = get_args1 args in
+    let shape = seq_ [a] in
+    let f = lam_ (from_utf8 "") (float_ 0.0) in
+    app2_ (const_ (CtensorCreate None)) shape f
+
+  (* Translation of Array.make_matrix *)
+  let make_matrix args =
+    let nrows, ncols, v = get_args3 args in
+    let shape = seq_ [nrows] in
+    let mk_row ncols v = lam_ (from_utf8 "") (make [ncols; v]) in
+    app2_ (const_ (CtensorCreate None)) shape (mk_row ncols v)
+
+  (* Translation of Array.iter *)
+  let iter args =
+    let a1, a2 = get_args2 args in
+    (* f x -> lam. f (tensorGetExn x []) *)
+    let f =
+      lam_ (from_utf8 "")
+        (lam_ (from_utf8 "x")
+           (app_ a1
+              (app2_ (const_ (CtensorGetExn None)) (mk_var "" "x") (seq_ [])) ) )
+    in
+    app2_ (const_ (CtensorIteri None)) f a2
+
+  (* Translation of Array.iteri *)
+  let iteri args =
+    let a1, a2 = get_args2 args in
+    (* f i x -> f i (tensorGetExn x []) *)
+    let f =
+      lam_ (from_utf8 "i")
+        (lam_ (from_utf8 "x")
+           (app2_ a1 (mk_var "" "i")
+              (app2_ (const_ (CtensorGetExn None)) (mk_var "" "x") (seq_ [])) ) )
+    in
+    app2_ (const_ (CtensorIteri None)) f a2
+
+  (* Translation of Array.length *)
+  let length args =
+    let a = get_args1 args in
+    app2_ (const_ (Cget None)) (app_ (const_ CtensorShape) a) (int_ 0)
+
+  (* Translation of Array.copy *)
+  let copy args =
+    let a = get_args1 args in
+    (* TODO: take type into account, for now assume float *)
+    let copyToTensor src dest =
+      mk_let (from_utf8 "dest_copy") dest
+        (mk_let (from_utf8 "")
+           (app2_ (const_ (CtensorCopyExn None)) src (mk_var "" "dest_copy"))
+           (mk_var "" "dest_copy") )
+    in
+    let mkDest a =
+      mk_let (from_utf8 "shape")
+        (app_ (const_ CtensorShape) a)
+        (app2_
+           (const_ (CtensorCreate None))
+           (mk_var "" "shape")
+           (lam_ (from_utf8 "") (float_ 0.0)) )
+    in
+    copyToTensor a (mkDest a)
+
+  (* Translation of Array.map *)
+  (* TODO: take type into account, for now assume float *)
+  let map args =
+    let f, src = get_args2 args in
+    add_include "tensor.mc" ;
+    let dest = copy [src] in
+    let mk_map dest = app3_ (mk_var "" "tensorMapExn") f src dest in
+    mk_let (from_utf8 "dest_map") dest
+      (mk_let (from_utf8 "")
+         (mk_map (mk_var "" "dest_map"))
+         (mk_var "" "dest_map") )
+
+  let fold_left args =
+    let f, init, a = get_args3 args in
+    let tensorFoldl =
+      Boot.Parserutils.parse_mexpr_string
+        (from_utf8
+           "let tensorFoldl = lam f. lam acc. lam t.\n\
+           \  let stop = get (tensorShape t) 0 in\n\
+           \  recursive let work = lam i. lam acc.\n\
+           \    if geqi i stop then acc\n\
+           \    else work (addi i 1) (f acc (tensorGetExn t [i]))\n\
+           \  in work 0 acc in ()\n" )
+    in
+    match tensorFoldl with
+    | TmLet (fi, ident, symb, ty, body, _) ->
+        TmLet
+          (fi, ident, symb, ty, body, app3_ (mk_var "" "tensorFoldl") f init a)
+    | _ ->
+        failwith "Array2Tensor.fold_left not correct"
+
+  (* Translation of Array.get *)
+  let get args =
+    let a1, a2 = get_args2 args in
+    app2_ (const_ (CtensorGetExn None)) a1 (seq_ [a2])
+
+  (* Translation of Array.set *)
+  let set args =
+    let a1, a2, a3 = get_args3 args in
+    app3_ (const_ (CtensorSetExn (None, None))) a1 (seq_ [a2]) a3
+
+  (* Translation of Array.of_list *)
+  let of_list args =
+    let lst = get_args1 args in
+    let shape = seq_ [app_ (const_ Clength) lst] in
+    app2_
+      (const_ (CtensorCreate None))
+      shape
+      (lam_ (from_utf8 "i")
+         (app2_ (const_ (Cget None)) lst
+            (app2_ (const_ (Cget None)) (mk_var "" "i") (int_ 0)) ) )
+
+  (* Compile Sys.argv *)
+  let argv = of_list [mk_var "" "argv"]
+
+  (* TODO: Array. blit *)
+end
+
 (* Parse an OCaml .ml file *)
 let parse_file filename =
   let ast = Parse.implementation (open_in filename |> Lexing.from_channel) in
@@ -246,20 +466,31 @@ let typed2lambda typed =
   lamprog
 
 (* Access in modules, either external or in-file defined *)
+(* Arrays are handled in Array2Tensor *)
 let rec compile_module_access = function
   (* Standard library I/O and strings *)
   | "Stdlib.print_endline" ->
       add_include "common.mc" ; mk_var "" "printLn"
+  | "Stdlib.print_string" ->
+      const_ Cprint
   | "Stdlib.print_int" ->
       lam_ (from_utf8 "x")
         (app_ (const_ Cprint)
            (app_
               (compile_module_access "Stdlib.string_of_int")
               (mk_var "" "x") ) )
+  | "Stdlib.print_float" ->
+      lam_ (from_utf8 "x")
+        (app_ (const_ Cprint)
+           (app_
+              (compile_module_access "Stdlib.string_of_float")
+              (mk_var "" "x") ) )
   | "Stdlib.read_line" ->
       const_ CreadLine
   | "Stdlib.string_of_int" ->
       add_include "string.mc" ; mk_var "" "int2string"
+  | "Stdlib.string_of_float" ->
+      add_include "string.mc" ; mk_var "" "float2string"
   | "Stdlib.^" ->
       TmConst (NoInfo, Cconcat None)
   | "Stdlib.Char.escaped" ->
@@ -279,6 +510,10 @@ let rec compile_module_access = function
       const_ (Cconcat None)
   | "Stdlib.List.cons" ->
       const_ (Ccons None)
+  | "Stdlib.List.length" ->
+      const_ Clength
+  | "Stdlib.List.iter" ->
+      add_include "seq.mc" ; mk_var "" "iter"
   (* Standard library random numbers *)
   | "Stdlib.Random.init" ->
       const_ CrandSetSeed
@@ -302,7 +537,7 @@ let compile_constant = function
          therefore change in the future. *)
       int_ (int_of_char c)
   | Const_float f ->
-      TmConst (NoInfo, CFloat (float_of_string f))
+      float_ (float_of_string f)
   (* TODO(Linnea, 2021-03-10): What does the delim do? *)
   | Const_string (str, delim) ->
       mk_string str
@@ -329,7 +564,7 @@ let rec compile_structured_constant = function
   | Const_pointer (1, Ptr_bool) ->
       true_
   | Const_pointer _ ->
-      failwith "const_pointer"
+      tmUnit
   | Const_block (tag, str_const_list, (Tag_record | Tag_tuple)) ->
       let consts = List.map compile_structured_constant str_const_list in
       mk_tuple consts
@@ -347,7 +582,7 @@ let rec compile_structured_constant = function
         | _ ->
             failwith "Expected cons or empty list"
       in
-      let elems = collect_list [] c in
+      let elems = List.rev (collect_list [] c) in
       TmSeq (NoInfo, Mseq.Helpers.of_list elems)
   | Const_block (tag, str_const_list, Tag_con name) ->
       let consts = List.map compile_structured_constant str_const_list in
@@ -389,6 +624,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
   (* Operations on heap blocks *)
   | Pmakeblock (_tag, _mut, _shape, Tag_con "::") ->
       mk_constapp2 (Ccons None) args
+  | Pmakeblock (_tag, _mut, _shape, Tag_con s) ->
+      conapp_ (from_utf8 s) (mk_tuple args)
   | Pmakeblock (_tag, _mut, _shape, _) ->
       (* TODO(Linnea, 2021-04-08): handle other tags *)
       mk_tuple args
@@ -420,6 +657,8 @@ let rec compile_primitive (p : Lambda.primitive) args =
           failwith (sprintf "Out of bounds access in cons: %d" n) )
     | _ ->
         failwith "Expected one argument to Pfield immediate" )
+  | Pfield (n, Pointer, Immutable, Fnone) ->
+      failwith "here"
   | Pfield (_, _, _, _) ->
       failwith "Pfield"
   | Pfield_computed
@@ -444,6 +683,12 @@ let rec compile_primitive (p : Lambda.primitive) args =
       (* NOTE(Linnea, 2021-04-08): Assume integer <, and hope that it fails
          spectacularly if not true *)
       mk_constapp2 (Clti None) args
+  | Pccall {prim_name= "caml_make_vect"} ->
+      Array2Tensor.make args
+  | Pccall {prim_name= "caml_make_float_vect"} ->
+      Array2Tensor.create_float args
+  | Pccall {prim_name= "caml_sys_argv"} ->
+      Array2Tensor.argv
   | Pccall desc ->
       failwith ("External call " ^ desc.prim_name ^ " not implemented")
   (* Exceptions *)
@@ -579,17 +824,19 @@ let rec compile_primitive (p : Lambda.primitive) args =
   | Pbyteslength | Pbytesrefu | Pbytessetu | Pbytesrefs | Pbytessets ->
       failwith "Operations on bytes not implemented"
   (* Array operations *)
+  | Parraylength _ ->
+      Array2Tensor.length args
   | Pmakearray (array_kind, mutable_flag) | Pduparray (array_kind, mutable_flag)
     ->
       failwith "Array operation not implemented"
+  | Parrayrefs _ ->
+      Array2Tensor.get args
+  | Parraysets _ ->
+      Array2Tensor.set args
   (* For [Pduparray], the argument must be an immutable array.
       The arguments of [Pduparray] give the kind and mutability of the
       array being *produced* by the duplication. *)
-  | Parraylength array_kind
-  | Parrayrefu array_kind
-  | Parraysetu array_kind
-  | Parrayrefs array_kind
-  | Parraysets array_kind ->
+  | Parrayrefu array_kind | Parraysetu array_kind ->
       failwith "Array operation not implemented"
   | Pisint ->
       failwith "Array operation not implemented"
@@ -690,23 +937,13 @@ and lambda2mcore (lam : Lambda.program) =
         mk_var_ident m ident
     | Lconst c ->
         compile_structured_constant c
-    | Lapply {ap_func= f; ap_args= args} ->
-        let rec mk_app = function
-          | [] ->
-              failwith "Application without a lhs"
-          | [a] ->
-              lambda2mcore' m a
-          | a :: args ->
-              TmApp (NoInfo, mk_app args, lambda2mcore' m a)
-        in
-        mk_app (List.rev (f :: args))
     | Lfunction {params; body} ->
         let rec mk_lambda params body =
           match params with
           | [] ->
               lambda2mcore' m body
           | (ident, _vkind) :: ps ->
-              lam_ (mk_ident m ident) (mk_lambda ps body)
+              lam_ (ident2mangled m ident) (mk_lambda ps body)
         in
         mk_lambda params body
     | Llet
@@ -716,13 +953,13 @@ and lambda2mcore (lam : Lambda.program) =
         , ident
         , Levent (lam, {lev_kind= Lev_module_definition mident})
         , inexpr ) ->
-        let b = lambda2mcore' (m ^ Ident.name ident ^ ".") lam in
+        let b = lambda2mcore' (append_module_ident m ident) lam in
         let i = lambda2mcore' m inexpr in
         (* NOTE(linnea, 2021-03-17): Inserts a dummy "<modulename> = ()" because
            the module name is referred to in makeblock *)
-        mk_let (mk_ident m ident) mcore_noop (mk_seq b i)
+        mk_let (ident2mangled m ident) mcore_noop (mk_seq b i)
     | Llet (_kind, _value_kind, ident, body, inexpr) ->
-        mk_let (mk_ident m ident) (lambda2mcore' m body)
+        mk_let (ident2mangled m ident) (lambda2mcore' m body)
           (lambda2mcore' m inexpr)
     | Lletrec (binds, inexpr) ->
         TmRecLets
@@ -730,7 +967,7 @@ and lambda2mcore (lam : Lambda.program) =
           , List.map
               (fun (ident, body) ->
                 ( NoInfo
-                , mk_ident m ident
+                , ident2mangled m ident
                 , Symb.Helpers.nosym
                 , TyUnknown NoInfo
                 , lambda2mcore' m body ) )
@@ -739,7 +976,7 @@ and lambda2mcore (lam : Lambda.program) =
     | Lprim (p, lamlist, loc) ->
         let args = List.map (lambda2mcore' m) lamlist in
         compile_primitive p args
-    | Lifthenelse (cnd, thn, els, Match_nil) ->
+    | Lifthenelse (cnd, thn, els, (Match_nil | Match_con "::")) ->
         TmMatch
           ( NoInfo
           , lambda2mcore' m cnd
@@ -862,16 +1099,68 @@ and lambda2mcore (lam : Lambda.program) =
     | Lstaticcatch (body, (i, _vars), handler) ->
         add_error_handler i (lambda2mcore' m handler) ;
         lambda2mcore' m body
+    (* Application of array functions *)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.init"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.init (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iter"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.iter (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.iteri"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.iteri (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.copy"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.copy (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func=
+            Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.make_matrix"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.make_matrix (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func= Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.map"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.map (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func=
+            Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.of_list"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.of_list (List.map (lambda2mcore' m) args)
+    | Lapply
+        { ap_func=
+            Lprim (Pfield (_, _, _, Fmodule "Stdlib.Array.fold_left"), _, _)
+        ; ap_args= args } ->
+        Array2Tensor.fold_left (List.map (lambda2mcore' m) args)
+    (* General application *)
+    | Lapply {ap_func= f; ap_args= args} ->
+        let rec mk_app = function
+          | [] ->
+              failwith "Application without a lhs"
+          | [a] ->
+              lambda2mcore' m a
+          | a :: args ->
+              TmApp (NoInfo, mk_app args, lambda2mcore' m a)
+        in
+        mk_app (List.rev (f :: args))
+    | Ltrywith (lbody, _param, _lhandler) ->
+        (* NOTE: Does not catch the error*)
+        lambda2mcore' m lbody
+    | Lfor (ident, start, stop, dir, body) ->
+        let loop_maker =
+          match dir with Upto -> mk_for_upto | Downto -> mk_for_downto
+        in
+        loop_maker (ident2varstr m ident) (lambda2mcore' m start)
+          (lambda2mcore' m stop) (lambda2mcore' m body)
     | Levent _ ->
         failwith "event"
     | Lstringswitch _ ->
         failwith "stringswitch"
-    | Ltrywith _ ->
-        failwith "trywith"
     | Lwhile _ ->
         failwith "while"
-    | Lfor _ ->
-        failwith "for"
     | Lassign _ ->
         failwith "assign"
     | Lsend _ ->
@@ -907,10 +1196,7 @@ let mcore_compile str =
         let oc = open_out (ocaml_out_prefix ^ ".mc") in
         fprintf oc "%s\n" str ;
         close_out oc ;
-        Sys.command
-          (sprintf "mi %s/../src/main/mi.mc -- compile %s.mc" mcore_stdlib
-             ocaml_out_prefix )
-        |> ignore
+        Sys.command (sprintf "mi compile %s.mc" ocaml_out_prefix) |> ignore
     | None ->
         failwith "Source-to-source compilation requires MCORE_STDLIB to be set"
   else ()

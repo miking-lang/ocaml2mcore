@@ -1,2 +1,0 @@
-mexpr
-(lam x. lam y. eqi x y) 2 3

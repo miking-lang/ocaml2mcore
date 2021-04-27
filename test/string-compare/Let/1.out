@@ -1,5 +1,0 @@
-mexpr
-let a = negi 3 in
-let b = a in
-let c = b in
-c

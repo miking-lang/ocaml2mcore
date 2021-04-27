@@ -1,4 +1,0 @@
-mexpr
-let foo = lam a. lam b. lam c.
-  addi (addi a b) c
-in foo 1 2 3
