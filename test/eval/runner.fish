@@ -34,8 +34,8 @@ echo "```" 1>&2
 
 if test $has_failed -ne 1
     echo "### Compiled program" 1>&2
-    echo "Command: `boot $comp_out`" 1>&2
-    command         boot $comp_out 1>$prog_out 2>$prog_err
+    echo "Command: `boot eval $comp_out`" 1>&2
+    command         boot eval $comp_out 1>$prog_out 2>$prog_err
     set code $status
 
     echo "Stderr (ignored):" 1>&2
